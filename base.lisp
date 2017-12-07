@@ -93,11 +93,17 @@
   (set-rgba-fill 1 1 1 1)
   (set-rgba-stroke 1 1 1 1)
   (set-line-width 1/2)
-  (loop :for v :in verts :do
-     (let ((x (car v))
-	   (y (cdr v)))
-       (centered-circle-path x y 0.75)
-       (fill-path))))
+  (let ((n (length verts)))
+    (loop :for v :in verts :for i :from 0 :do
+       (let ((x (car v))
+	     (y (cdr v))
+	     (pos (/ i n)))
+	 (set-rgba-fill (multi-lerp pos 0 1)
+			(multi-lerp pos 0 1 0)
+			(multi-lerp pos 1 0)
+			1)
+	 (centered-circle-path x y 0.75)
+	 (fill-path)))))
 
 (defun draw-curve (verts)
   (set-line-width 1/2)
@@ -190,6 +196,6 @@
 					;(lambda (x) (+ foff (* fmul (cis (polynomial (* xmul (+ xoff x)) 1 0 0 0)))))
 	   0 0
 	   (complex (* 2 hw) 0)
-	   16)))
+	   256)))
 					;(draw-verts (mapcar (compose #'ccons #'cdr) (make-verts (compose (curry #'* hw 2/3) #'cis) 0 tau 6)))
        (save-png file))))
