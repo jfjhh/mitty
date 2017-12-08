@@ -50,6 +50,9 @@
     (unless (< (abs dx) +cont-eps+)
 	(/ dy dx))))
 
+(defun slope* (p1 p2)
+  (slope (car p1) (cdr p1) (car p2) (cdr p2)))
+
 (defun deriv-verts (verts)
   (let* ((first (car verts))
 	 (second (cadr verts)))
@@ -65,11 +68,6 @@
 		(slope x1 y1 x3 y3)))
 	   )
      (list nil))))
-
-#|| TODO: Write me!
-(defun control-dverts (verts derivs)
-  ())
-||#
 
 (defun make-bullet* (f x0 y0 v0 n)
   (let* ((old (cons x0 y0))
@@ -187,15 +185,15 @@
       ; (draw-curve
       (draw-verts
 	(let ((xoff 0f0)
-	      (xmul (* tau))
+	      (xmul (* 300))
 	      (foff 0f0)
-	      (fmul 1f0))
+	      (fmul 35f0))
 	  (make-bullet*
-	   (lambda (x) (cis (* xmul x)))
+	   ;(lambda (x) (cis (* xmul x)))
 	   ;(lambda (x) (+ foff (* fmul (cis (polynomial (* xmul (+ xoff x)) 1 -3 2 0)))))
-					;(lambda (x) (+ foff (* fmul (cis (polynomial (* xmul (+ xoff x)) 1 0 0 0)))))
+	   (lambda (x) (+ foff (* fmul (cis (polynomial (* xmul (+ xoff x)) 1 0 0 0)))))
 	   0 0
 	   (complex (* 2 hw) 0)
-	   256)))
+	   4096)))
 					;(draw-verts (mapcar (compose #'ccons #'cdr) (make-verts (compose (curry #'* hw 2/3) #'cis) 0 tau 6)))
        (save-png file))))
