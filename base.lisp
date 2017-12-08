@@ -3,6 +3,12 @@
 ;;;; Alex Striff.
 ;;;;
 
+;;; Idea: Symbolic functions. `funcallable` things like (lambda (x) (* x 2)),
+;;; but with the symbolic data inside for things like symbolic differentiaion.
+;;; See: <https://www.youtube.com/watch?v=nTI_d-jS6dI>.
+
+;;; Idea: Make vector arithmetic generic, so (+ v1 v2) works.
+
 (in-package #:mitty)
 
 (defconstant tau (* 2 pi))

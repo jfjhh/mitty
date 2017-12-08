@@ -5,14 +5,9 @@
 
 (in-package #:mitty)
 
-(defun nrep* (n &optional (x 0f0))
-  (when (> n 0)
-    (cons x (nrep-list (1- n) x))))
-
 (defmacro %vn! (n)
   (let* ((nn (eval n))
 	 (name (intern (format nil "V~a!" nn))))
-    (format t "n is ~a, nn is ~a" n nn)
     `(defun ,name (&rest args)
        ;(declare (optimize (speed 3) (safety 1) (compilation-speed 0)))
        (declare (type cons args))
@@ -40,7 +35,7 @@
     `(defun ,name (&rest args)
        ;(declare (optimize (speed 3) (safety 1) (compilation-speed 0) (debug 3)))
        (declare (type cons args))
-       (let ((elems (append args (nrep* (- ,nn (length args)) 0f0))))
+       (let ((elems (append args (cmat (- ,nn (length args)) 0f0))))
 	 (make-array ,nn
 		     :element-type 'single-float
 		     :initial-contents elems)))))
@@ -51,7 +46,7 @@
     `(defun ,name (&rest args)
        ;(declare (optimize (speed 3) (safety 1) (compilation-speed 0) (debug 3)))
        (declare (type cons args))
-       (let ((elems (append args (nrep* (- ,nn (length args)) 0f0))))
+       (let ((elems (append args (cmat (- ,nn (length args)) 0f0))))
 	 (make-array ,nn
 		     :element-type 'single-float
 		     :initial-contents (mapcar #'float elems))))))
@@ -126,3 +121,30 @@
 
 (defun nrep (n &optional (x 0))
   (make-array n :initial-element x))
+
+(defun sv* (s v)
+  (map 'vector (curry #'* s) v))
+
+(defun mv* (a x)
+  "Multiplies a matrix by a vector."
+  (vv+ (map 'vector #'v* a (map 'vector (curry #'nrep (length a)) x))))
+
+(defun mm* (a b)
+  "Multiplies a matrix by a matrix."
+  (map 'vector (curry #'mv* a) b))
+
+(defun sm* (s m)
+  (map 'vector (curry #'sv* s) m))
+
+(defun cmat (n &optional (c 0))
+  (nrep n (nrep n c)))
+
+(defun print-mat (a)
+  (format t "#<MAT~%")
+  (let ((at (vvt a)))
+    (dotimes (i (length at))
+      (let ((v (elt at i)))
+	(dotimes (j (length v))
+	  (format t "~2d " (elt v j)))
+	(terpri))))
+  (format t ">~%"))
