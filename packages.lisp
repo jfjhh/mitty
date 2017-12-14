@@ -6,7 +6,7 @@
 (defpackage #:mitty
   (:use #:common-lisp
 	#:alexandria
-  #:lispbuilder-sdl
-  #:bordeaux-threads
-	#:vecto))
+	#:lispbuilder-sdl
+	#:bordeaux-threads
+	#:gsll))
 

@@ -3,6 +3,8 @@
 ;;;; Alex Striff
 ;;;;
 
+(in-package #:mitty)
+
 (defclass particle ()
   ((pos :initform (grid:make-foreign-array
 		   'double-float

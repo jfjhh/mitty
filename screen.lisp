@@ -3,6 +3,8 @@
 ;;;; Alex Striff
 ;;;;
 
+(in-package #:mitty)
+
 (defclass screen ()
   ((dims :initarg dims
 	 :accessor dims

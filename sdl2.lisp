@@ -5,9 +5,6 @@
 
 (in-package #:mitty)
 
-(defparameter *width* 1024)
-(defparameter *height* 1024)
-
 (defparameter *xs* '(0 1/4 1/2 3/4 1))
 (defparameter *ys* '(0 1/4 1/2 3/4 1))
 
@@ -18,10 +15,12 @@
 
 (defparameter *bscreen*
   (make-instance 'sdl-screen
-		 :width *width*
-		 :height *height*))
+		 :width 640
+		 :height 640))
 
 (defun reset ()
+  (sdl:clear-display (sdl:color :r 0 :g 0 :b 0))
+  (sdl:update-display)
   (setf *time* 0d0)
   (setf *bullet*
 	(make-instance 'rot-particle
@@ -76,17 +75,11 @@
   (bt:make-thread func :name name))
 
 (defmethod bezier ()
-  (let ((width *width*)
-	(height *height*))
+  (with-slots (width height) *bscreen*
     (sdl:with-init ()
       (sdl:window width height :title-caption "Mitty | SDL2 Test")
       (setf (sdl:frame-rate) 60)
-      (sdl:clear-display (sdl:color :r 0 :g 0 :b 0))
-      (sdl:with-surface (disp sdl:*default-display*)
-	(sdl:with-color (col (sdl:color :r 255 :g 255 :b 255))
-	  (sdl:clear-display (sdl:color :r 0 :g 0 :b 0))
-	  (reset)))
-      (sdl:update-display)
+      (reset)
       (sdl:with-events ()
 	(:quit-event () t)
 	(:key-down-event (:key key)  
@@ -106,7 +99,7 @@
 
 	       ;; Main stuff.
 	       ;; Blanking Box
-	       ;(sdl:draw-box (sdl:rectangle :x 0 :y 0 :w width :h height) :color (sdl:color :r 0 :g 0 :b 0) :alpha 8)
+					;(sdl:draw-box (sdl:rectangle :x 0 :y 0 :w width :h height) :color (sdl:color :r 0 :g 0 :b 0) :alpha 8)
 
 	       #||
 	       ;; Particle stuff.
@@ -115,5 +108,5 @@
 	       (update-particle *bullet* 0.1d0)
 	       (draw-particle *bullet* *bscreen*)
 	       ||#
-	       ;(when (zerop (setf *frame* (mod (1+ *frame*) 10))))
+					;(when (zerop (setf *frame* (mod (1+ *frame*) 10))))
 	       (sdl:update-display))))))
