@@ -12,16 +12,27 @@
 (defparameter *frame* 0)
 
 (defparameter *bullet* nil)
+(defparameter *sp* nil)
 
 (defparameter *bscreen*
   (make-instance 'sdl-screen
-		 :width 640
-		 :height 640))
+		 :width 1024
+		 :height 1024))
 
 (defun reset ()
   (sdl:clear-display (sdl:color :r 0 :g 0 :b 0))
   (sdl:update-display)
   (setf *time* 0d0)
+  (setf *sp*
+	(make-instance
+	 'spell
+	 :genf (lambda (s &rest x)
+		 (declare (ignore x))
+		 (when (zerop (mod (slot-value s 'nups) 10))
+		   (make-instance 'rot-particle
+				  :vel 0.01d0
+				  :theta (random tau)
+				  :omega (random 1d0))))))
   (setf *bullet*
 	(make-instance 'rot-particle
 		       :pos (grid:make-foreign-array
@@ -103,10 +114,16 @@
 
 	       #||
 	       ;; Particle stuff.
-	       (incf *time* 0.05d0)
-	       (setf (slot-value *bullet* 'omega) (expt *time* 2))
-	       (update-particle *bullet* 0.1d0)
-	       (draw-particle *bullet* *bscreen*)
+	       (incf *time* 0.01d0)
+	       (setf (slot-value *bullet* 'omega)
+		     (+ 0
+			(* 3 (sin (* 3 *time*)))
+			(* 5 (cos (* 50 *time*)))))
+	       (update *bullet* 0.01d0)
+	       (draw *bullet* *bscreen*)
+
+	       (update *sp* 0.001d0)
+	       (draw *sp* *bscreen*)
 	       ||#
-					;(when (zerop (setf *frame* (mod (1+ *frame*) 10))))
+
 	       (sdl:update-display))))))

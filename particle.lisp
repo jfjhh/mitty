@@ -67,6 +67,18 @@
 	  :accessor omega
 	  :type 'double-float)))
 
+(defclass spell ()
+  ((parts :initform (make-array 0 :fill-pointer 0 :element-type '(or particle spell))
+	  :initarg :parts
+	  :accessor parts
+	  :type 'simple-vector)
+   (nups :initform 0
+	 :accessor nups
+	 :type 'integer)
+   (genf :initform (constantly nil)
+	 :initarg :genf
+	 :accessor genf)))
+
 (defgeneric generate (g dimfuncs &key start end)
   (:documentation "Generates g with the vector results of dimfuncs on [0,1]."))
 
@@ -76,8 +88,8 @@
 (defgeneric particle-collide (p)
   (:documentation "Collides the particle with the boundaries."))
 
-(defgeneric update-particle (p dt)
-  (:documentation "Updates the particle p with time step dt."))
+(defgeneric update (p dt)
+  (:documentation "Updates the moving object p with time step dt."))
 
 (defmethod generate ((g generator) dimfuncs &key (start 0d0) (end 1d0))
   (with-slots (ndims npoints dims) g
@@ -121,9 +133,9 @@
 	   (px (car coords))
 	   (py (cadr coords)))
       (setf *cparam* (mod (+ *cparam* 0.005d0) 1d0))
-      (draw-out-circle px py))))
+      (draw-out-circle px py 1))))
 
-(defmethod draw ((g generator) (s sdl-screen) &key (hr 1/2) (pmin nil) (pmax nil))
+(defmethod draw ((g generator) (s sdl-screen) &key (hr 5) (pmin nil) (pmax nil))
   (with-slots (width height) s
     (with-slots (dims ndims npoints) g
       (let* ((coords
@@ -185,6 +197,14 @@
 			    ;:pmin pmin :pmax pmax
 			    ))))))
 
+(defmethod draw ((l spell) (s sdl-screen) &key (clear t))
+  (when clear
+    (sdl:clear-display (sdl:color)))
+  (with-slots (width height) s
+    (with-slots (parts) l
+      (loop :for p :being :the :elements :of parts :do
+	 (draw p s)))))
+
 (defun draw-out-circle (x y &optional (hr 1/2))
   (setf *cparam* (mod (+ *cparam* 0.005d0) 1d0))
   (sdl:draw-filled-circle
@@ -196,9 +216,11 @@
 
 (defun draw-out-line (x1 y1 x2 y2)
   (setf *cparam* (mod (+ *cparam* 0.001d0) 1d0))
-  (sdl:draw-line
-   (sdl:point :x x1 :y y1)
-   (sdl:point :x x2 :y y2)
+  (sdl-gfx:draw-line-*
+   (floor x1)
+   (floor y1)
+   (floor x2)
+   (floor y2)
    :color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
 		     :g (floor (multi-lerp *cparam* 0   0   255 0))
 		     :b (floor (multi-lerp *cparam* 0   255 0   0)))))
@@ -234,9 +256,18 @@
       ||#
       )))
 
-(defmethod update-particle ((p rot-particle) (dt number))
+(defmethod update ((p rot-particle) (dt number))
   (with-slots (pos vel theta omega) p
     (setf theta (mod (+ theta (* omega dt)) tau))
     (incf (grid:aref pos 0) (* vel (cos theta)))
     (incf (grid:aref pos 1) (* vel (sin theta)))
     (particle-collide p)))
+
+(defmethod update ((s spell) (dt number))
+  (with-slots (parts nups genf) s
+    (incf nups)
+    (let ((addition (funcall genf s dt)))
+      (when addition
+	(vector-push-extend addition parts)))
+    (loop :for p :being :the :elements :of parts :do
+       (update p dt))))
