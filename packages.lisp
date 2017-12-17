@@ -9,5 +9,14 @@
 	#:lispbuilder-sdl
 	#:lispbuilder-sdl-gfx
 	#:bordeaux-threads
-	#:gsll))
+	#:gsll)
+  (:shadowing-import-from #:lispbuilder-sdl-gfx
+			  #:*default-font*)
+  (:shadowing-import-from #:gsll
+			  #:knots
+			  #:factorial
+			  #:mean
+			  #:variance
+			  #:median
+			  #:standard-deviation))
 
