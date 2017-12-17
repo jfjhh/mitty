@@ -6,7 +6,10 @@
 (in-package #:mitty)
 
 (defclass particle ()
-  ((pos :initform (grid:make-foreign-array
+  ((alive :initform t
+	  :accessor alive
+	  :type '(boolean null))
+   (pos :initform (grid:make-foreign-array
 		   'double-float
 		   :initial-contents '(0d0 0d0))
 	:initarg :pos
@@ -32,6 +35,10 @@
 	   :type 'simple-vector)
    (sdims :accessor sdims
 	  :type 'simple-vector)
+   (ddims :accessor ddims
+	  :type 'simple-vector)
+   (cdims :accessor cdims
+	  :type 'simple-vector)
    (knots :accessor knots
 	  :type 'grid:vector-double-float)))
 
@@ -44,12 +51,20 @@
 				      :dimensions npoints)))))
 
 (defmethod initialize-instance :after ((s splinerator) &key)
-  (with-slots (npoints nevals sdims ndims gsplines knots) s
+  (with-slots (npoints nevals sdims ddims cdims ndims gsplines knots) s
     (setf sdims (make-array ndims))
+    (setf ddims (make-array ndims))
+    (setf cdims (make-array ndims))
     (setf gsplines (make-array ndims))
     (setf knots (grid:make-foreign-array 'double-float :dimensions npoints))
     (loop :for i :below ndims :do
        (setf (aref sdims i)
+	     (grid:make-foreign-array 'double-float
+				      :dimensions nevals))
+       (setf (aref ddims i)
+	     (grid:make-foreign-array 'double-float
+				      :dimensions nevals))
+       (setf (aref cdims i)
 	     (grid:make-foreign-array 'double-float
 				      :dimensions nevals)))))
 
@@ -57,6 +72,10 @@
   ((vel :initform 0d0
 	:initarg :vel
 	:accessor vel
+	:type 'double-float)
+   (acc :initform 0d0
+	:initarg :acc
+	:accessor acc
 	:type 'double-float)
    (theta :initform 0d0
 	  :initarg :theta
@@ -67,7 +86,7 @@
 	  :accessor omega
 	  :type 'double-float)))
 
-(defclass spell ()
+(defclass spell (rot-particle)
   ((parts :initform (make-array 0 :fill-pointer 0 :element-type '(or particle spell))
 	  :initarg :parts
 	  :accessor parts
@@ -101,7 +120,7 @@
 
 (defmethod generate :after ((s splinerator) dimfuncs &key (start 0d0) (end 1d0))
   (declare (ignore dimfuncs))
-  (with-slots (dims sdims ndims npoints nevals gsplines knots) s
+  (with-slots (dims sdims ddims cdims ndims npoints nevals gsplines knots) s
     (loop :for i :from 0 :below npoints :do
        (setf (grid:aref knots i)
 	     (float (lerp (/ i (1- npoints)) start end) 0d0)))
@@ -116,6 +135,14 @@
        (loop :for j :from 0 :below nevals :do
 	  (setf (grid:aref (aref sdims i) j)
 		(gsll:evaluate
+		 (aref gsplines i)
+		 (float (lerp (/ j (1- nevals)) start end) 0d0)))
+	  (setf (grid:aref (aref ddims i) j)
+		(gsll:evaluate-derivative
+		 (aref gsplines i)
+		 (float (lerp (/ j (1- nevals)) start end) 0d0)))
+	  (setf (grid:aref (aref cdims i) j)
+		(gsll:evaluate-second-derivative
 		 (aref gsplines i)
 		 (float (lerp (/ j (1- nevals)) start end) 0d0)))))))
 
@@ -132,7 +159,6 @@
     (let* ((coords (screen-pos p s))
 	   (px (car coords))
 	   (py (cadr coords)))
-      (setf *cparam* (mod (+ *cparam* 0.005d0) 1d0))
       (draw-out-circle px py 1))))
 
 (defmethod draw ((g generator) (s sdl-screen) &key (hr 5) (pmin nil) (pmax nil))
@@ -142,13 +168,17 @@
 	      (map
 	       'vector
 	       (lambda (d)
-		 (let ((pmin (or pmin (loop :for i :from 0 :below npoints
-					 :minimizing (grid:aref d i))))
-		       (pmax (or pmax (loop :for i :from 0 :below npoints
-					 :maximizing (grid:aref d i)))))
-		   (grid:map-grid :source d
-				  :element-function
-				  (lambda (x) (screen-pos x s :min pmin :max pmax)))))
+		 (unless pmin
+		   (setf pmin
+			 (loop :for i :from 0 :below npoints
+			    :minimizing (grid:aref d i))))
+		 (unless pmax
+		   (setf pmax
+			 (loop :for i :from 0 :below npoints
+			    :maximizing (grid:aref d i))))
+		 (grid:map-grid :source d
+				:element-function
+				(lambda (x) (screen-pos x s :min pmin :max pmax))))
 	       dims)))
 	(setf *cparam* (mod (+ *cparam* 0.005d0) 1d0))
 	(loop :for i :from 0 :below npoints :do
@@ -158,22 +188,25 @@
 			  (if (= j 1) (- height coord) coord)))))
 	     (draw-out-circle (car cs) (cadr cs) hr)))))))
 
-(defmethod draw ((p splinerator) (s sdl-screen) &key (hr 1/2) (base nil) (clear nil))
+(defmethod draw ((p splinerator) (s sdl-screen)
+		 &key (hr 1/2) (base nil) (clear nil) (pmin nil) (pmax nil))
   (declare (ignore hr))
   (when clear
     (sdl:clear-display (sdl:color)))
   (with-slots (width height) s
-    (with-slots (sdims ndims nevals) p
-      (let* ((pmin nil)
-	     (pmax nil)
-	     (coords
+    (with-slots (sdims ddims cdims ndims nevals) p
+      (let* ((coords
 	      (map
 	       'vector
 	       (lambda (d)
-		 (setf pmin (loop :for i :from 0 :below nevals
-			       :minimizing (grid:aref d i)))
-		 (setf pmax (loop :for i :from 0 :below nevals
-			       :maximizing (grid:aref d i)))
+		 (unless pmin
+		   (setf pmin
+			 (loop :for i :from 0 :below nevals
+			    :minimizing (grid:aref d i))))
+		 (unless pmax
+		   (setf pmax
+			 (loop :for i :from 0 :below nevals
+			    :maximizing (grid:aref d i))))
 		 (grid:map-grid :source d
 				:element-function
 				(lambda (x) (screen-pos x s :min pmin :max pmax))))
@@ -183,19 +216,31 @@
 		       (let ((coord (grid:aref (aref coords j) 0)))
 			 (if (= j 1) (- height coord) coord)))))
 	(loop :for i :from 1 :below nevals :do
-	   (let ((newcs
-		  (loop :for j :from 0 :below 2
-		     :collecting
-		     (let ((coord (grid:aref (aref coords j) i)))
-		       (if (= j 1) (- height coord) coord)))))
-					;(draw-out-circle (car oldcs) (cadr oldcs) hr)
-	     (draw-out-line (car oldcs) (cadr oldcs)
-			    (car newcs) (cadr newcs))
+	   (let* ((newcs
+		   (loop :for j :from 0 :below 2
+		      :collecting
+		      (let ((coord (grid:aref (aref coords j) i)))
+			(if (= j 1) (- height coord) coord))))
+		  (x0 (car  oldcs))
+		  (y0 (cadr oldcs))
+		  (x1 (car  newcs))
+		  (y1 (cadr newcs))
+		  (dx (grid:aref (aref ddims 0) i))
+		  (dy (grid:aref (aref ddims 1) i))
+		  (cx (grid:aref (aref cdims 0) i))
+		  (cy (grid:aref (aref cdims 1) i))
+		  (vq (+ (* dx dx) (* dy dy)))
+		  (k (/ (- (* dx cy) (* dy cx)) (expt vq 3/2)))
+		  (tn (atan dx dy))
+		  (nlen (* 16 k))
+		  (xn (+ x1 (* nlen (cos tn))))
+		  (yn (+ y1 (* nlen (sin tn)))))
+	     (setf tmp0 (max tmp0 k))
+	     (draw-out-line x0 y0 x1 y1)
+	     (draw-out-line x1 y1 xn yn)
 	     (setf oldcs newcs)))
 	(when base
-	  (call-next-method p s :hr 2
-			    ;:pmin pmin :pmax pmax
-			    ))))))
+	  (call-next-method p s :hr 2 :pmin pmin :pmax pmax))))))
 
 (defmethod draw ((l spell) (s sdl-screen) &key (clear t))
   (when clear
@@ -206,13 +251,14 @@
 	 (draw p s)))))
 
 (defun draw-out-circle (x y &optional (hr 1/2))
-  (setf *cparam* (mod (+ *cparam* 0.005d0) 1d0))
-  (sdl:draw-filled-circle
-   (sdl:point :x x :y y)
-   (* hr 2)
-   :color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
-		     :g (floor (multi-lerp *cparam* 0   0   255 0))
-		     :b (floor (multi-lerp *cparam* 0   255 0   0)))))
+  ;;(setf *cparam* (mod (+ *cparam* 0.0001d0) 1d0))
+  ;;(sdl:draw-filled-circle
+   (sdl:draw-aa-circle
+    (sdl:point :x x :y y)
+    (* hr 2)
+    :color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
+		      :g (floor (multi-lerp *cparam* 0   0   255 0))
+		      :b (floor (multi-lerp *cparam* 0   255 0   0)))))
 
 (defun draw-out-line (x1 y1 x2 y2)
   (setf *cparam* (mod (+ *cparam* 0.001d0) 1d0))
@@ -226,9 +272,10 @@
 		     :b (floor (multi-lerp *cparam* 0   255 0   0)))))
 
 (defmethod particle-collide ((p rot-particle))
-  (with-slots (pos vel theta omega) p
+  (with-slots (alive pos vel theta omega) p
     (let ((x (grid:aref pos 0))
 	  (y (grid:aref pos 1)))
+      #||
       ;; Wall wrapping.
       (when (< x -1d0)
 	(setf (grid:aref pos 0)  1d0))
@@ -238,6 +285,7 @@
 	(setf (grid:aref pos 1)  1d0))
       (when (> y 1d0)
 	(setf (grid:aref pos 1) -1d0))
+      ||#
 
       #||
       ;; Wall bouncing.
@@ -254,20 +302,37 @@
 	(setf (grid:aref pos 1)  1d0)
 	(setf theta (- tau theta)))
       ||#
+
+      ;; Dying.
+      (when (or (< x -1d0)
+		(> x 1d0)
+		(< y -1d0)
+		(> y 1d0))
+	(setf alive nil))
       )))
 
 (defmethod update ((p rot-particle) (dt number))
-  (with-slots (pos vel theta omega) p
+  (with-slots (pos vel acc theta omega) p
     (setf theta (mod (+ theta (* omega dt)) tau))
-    (incf (grid:aref pos 0) (* vel (cos theta)))
-    (incf (grid:aref pos 1) (* vel (sin theta)))
+    (setf vel (+ vel (* acc dt)))
+    (incf (grid:aref pos 0) (* vel dt (cos theta)))
+    (incf (grid:aref pos 1) (* vel dt (sin theta)))
     (particle-collide p)))
 
 (defmethod update ((s spell) (dt number))
+  ;;(call-next-method s dt)
+  (with-slots (pos vel acc theta omega) s
+    (setf theta (mod (+ theta (* omega dt)) tau))
+    (setf vel (+ vel (* acc dt)))
+    (incf (grid:aref pos 0) (* vel dt (cos theta)))
+    (incf (grid:aref pos 1) (* vel dt (sin theta)))
+    (particle-collide s))
   (with-slots (parts nups genf) s
     (incf nups)
     (let ((addition (funcall genf s dt)))
       (when addition
 	(vector-push-extend addition parts)))
     (loop :for p :being :the :elements :of parts :do
-       (update p dt))))
+       (update p dt))
+    (delete-if-not (lambda (p) (slot-value p 'alive)) parts)
+    ))

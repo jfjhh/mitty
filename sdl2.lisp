@@ -26,13 +26,17 @@
   (setf *sp*
 	(make-instance
 	 'spell
+	 :vel 1e-3
+	 :omega -1e-2
 	 :genf (lambda (s &rest x)
 		 (declare (ignore x))
-		 (when (zerop (mod (slot-value s 'nups) 10))
+		 (with-slots (nups pos) s
 		   (make-instance 'rot-particle
-				  :vel 0.01d0
-				  :theta (random tau)
-				  :omega (random 1d0))))))
+				  :pos (grid:copy pos)
+				  :vel 0.0005d0
+				  :acc 0d0
+				  :theta (* 0.5 nups)
+				  :omega 0d0)))))
   (setf *bullet*
 	(make-instance 'rot-particle
 		       :pos (grid:make-foreign-array
@@ -99,19 +103,6 @@
 			   (sdl:push-quit-event)))
 	(:video-expose-event () (sdl:update-display))
 	(:idle ()
-	       ;; Run the loop but also keep SLIME working for interactivity.
-	       #||
-	       (let ((connection
-	       (or swank::*emacs-connection* (swank::default-connection))))
-	       (when (and connection
-	       (not (eql swank:*communication-style* :spawn)))
-	       (swank::handle-requests connection t)))
-	       ||#
-
-	       ;; Main stuff.
-	       ;; Blanking Box
-					;(sdl:draw-box (sdl:rectangle :x 0 :y 0 :w width :h height) :color (sdl:color :r 0 :g 0 :b 0) :alpha 8)
-
 	       #||
 	       ;; Particle stuff.
 	       (incf *time* 0.01d0)
@@ -121,9 +112,12 @@
 			(* 5 (cos (* 50 *time*)))))
 	       (update *bullet* 0.01d0)
 	       (draw *bullet* *bscreen*)
+	       ||#
 
-	       (update *sp* 0.001d0)
+	       #||
+	       (update *sp* 3d0)
 	       (draw *sp* *bscreen*)
+	       (setf *cparam* (mod (+ *cparam* 0.01d0) 1d0))
 	       ||#
 
 	       (sdl:update-display))))))
