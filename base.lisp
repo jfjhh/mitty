@@ -135,21 +135,13 @@
 
 (defmethod screen-pos ((p double-float) (s sdl-screen) &key min max (shrink t))
   (with-slots (width height) s
-    (let ((longdim (min width height)))
-      (+ (if shrink (* 1/2 1/8 longdim) 0)
-	 (* (if shrink 7/8 1)
+    (let ((longdim (min width height))
+	  (factor (/ (sqrt 3))))
+      (+ (if shrink (* 1/2 (- 1 factor) longdim) 0)
+	 (* (if shrink factor 1)
 	    (lerp (/ (- p min) (abs (- max min)))
 		  0
 		  longdim))))))
-
-(defgeneric draw (p s &key)
-  (:documentation "Draws the particle p on the screen s."))
-
-(defgeneric particle-collide (p)
-  (:documentation "Collides the particle with the boundaries."))
-
-(defgeneric update (p dt)
-  (:documentation "Updates the moving object p with time step dt."))
 
 (declaim (inline quadrance))
 (defun quadrance (&rest nums)
@@ -184,24 +176,6 @@
     (error "param on ~a was called with ~a not in [0,1]." p u))
   (with-slots (start end) (interpolants p)
     (lerp u start end)))
-
-(defgeneric arc-length (curve u &optional v)
-  (:documentation "Calculates the arc length of curve from 0 to u,
-or between u and v if v is supplied. u and v are in [0,1]."))
-
-(defmethod arc-length ((object spline-curve) (u double-float) &optional v)
-  (let ((a (if v u 0d0))
-	(b (or v u))
-	(ds (lambda (u) (sqrt (+ 1d0 (expt (evaluate-derivative object u) 2))))))
-    (gsll:integration-qag ds a b :gauss61)))
-
-(defmethod arc-length ((object plane-curve) (u double-float) &optional v)
-  (with-slots (x y) object
-    (let ((a (if v u 0d0))
-	  (b (or v u))
-	  (ds (lambda (u) (sqrt (+ (expt (evaluate-derivative x u) 2)
-			      (expt (evaluate-derivative y u) 2))))))
-      (gsll:integration-qag ds a b :gauss61))))
 
 (defmethod evaluate ((object parametric-points) (u real) &key)
   (with-slots (func start end) object
@@ -258,6 +232,67 @@ or between u and v if v is supplied. u and v are in [0,1]."))
       (/ (- (* dx cy) (* dy cx))
 	 (expt (+ (* dx dx) (* dy dy)) 3/2)))))
 
+(defgeneric arc-length (curve u &optional v)
+  (:documentation "Calculates the arc length of curve from 0 to u,
+or between u and v if v is supplied. u and v are in [0,1]."))
+
+(defmethod arc-length ((object spline-curve) (u double-float) &optional v)
+  (let ((a (if v u 0d0))
+	(b (or v u))
+	(ds (lambda (u) (sqrt (+ 1d0 (expt (evaluate-derivative object u) 2))))))
+    (gsll:integration-qag ds a b :gauss61)))
+
+(defmethod arc-length ((object plane-curve) (u double-float) &optional v)
+  (with-slots (x y) object
+    (let ((a (if v u 0d0))
+	  (b (or v u))
+	  (ds (lambda (u) (sqrt (+ (expt (evaluate-derivative x u) 2)
+			      (expt (evaluate-derivative y u) 2))))))
+      (gsll:integration-qag ds a b :gauss61))))
+
+(defgeneric arc-param (object s)
+  (:documentation "Finds the parameter where the arc length of object is s."))
+
+(defmethod arc-param ((object spline-curve) (s double-float))
+  (with-slots (start end) (interpolants object)
+    (let ((max-iter 64)
+	  (solver
+	   (gsll:make-one-dimensional-root-solver-f
+	    gsll:+brent-fsolver+
+	    (lambda (u) (- (arc-length object u) s))
+	    start
+	    end)))
+      (loop :for iter :from 0
+	 :for root = (gsll:solution solver)
+	 :for lower = (gsll:fsolver-lower solver)
+	 :for upper = (gsll:fsolver-upper solver)
+	 :do (gsll:iterate solver)
+	 :while (and (< iter max-iter)
+		     (not (gsll:root-test-interval lower upper 0d0 1d-3)))
+	 :finally (return root)))))
+
+(defmethod arc-param ((object plane-curve) (s double-float))
+  (with-slots (x y) object
+    (let* ((max-iter 64)
+	   (xinterp (interpolants x))
+	   (yinterp (interpolants y))
+	   (start (max (start xinterp) (start yinterp)))
+	   (end (min (end xinterp) (end yinterp)))
+	   (solver
+	    (gsll:make-one-dimensional-root-solver-f
+	     gsll:+brent-fsolver+
+	     (lambda (u) (- (arc-length object u) s))
+	     start
+	     end)))
+      (loop :for iter :from 0
+	 :for root = (gsll:solution solver)
+	 :for lower = (gsll:fsolver-lower solver)
+	 :for upper = (gsll:fsolver-upper solver)
+	 :do (gsll:iterate solver)
+	 :while (and (< iter max-iter)
+		     (not (gsll:root-test-interval lower upper 0d0 1d-3)))
+	 :finally (return root)))))
+
 (defparameter *cparam* 0d0)
 
 (defun multi-lerp (v &rest interpolants)
@@ -267,6 +302,25 @@ or between u and v if v is supplied. u and v are in [0,1]."))
     (multiple-value-bind (k u) (floor (* v (1- len)))
       (let ((c (nthcdr k interpolants)))
 	(lerp u (car c) (cadr c))))))
+
+(defun draw-out-circle (x y &optional (hr 1/2))
+  (sdl:draw-aa-circle
+   (sdl:point :x x :y y)
+   (* hr 2)
+   :color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
+		     :g (floor (multi-lerp *cparam* 0   0   255 0))
+		     :b (floor (multi-lerp *cparam* 0   255 0   0)))))
+
+(defun draw-out-line (x1 y1 x2 y2)
+  (setf *cparam* (mod (+ *cparam* 0.001d0) 1d0))
+  (sdl-gfx:draw-line-*
+   (floor x1) (floor y1) (floor x2) (floor y2)
+   :color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
+		     :g (floor (multi-lerp *cparam* 0   0   255 0))
+		     :b (floor (multi-lerp *cparam* 0   255 0   0)))))
+
+(defgeneric draw (p s &key)
+  (:documentation "Draws the particle p on the screen s."))
 
 (defmethod draw ((p particle) (s sdl-screen) &key)
   (with-slots (width height) s
@@ -314,21 +368,8 @@ or between u and v if v is supplied. u and v are in [0,1]."))
       (loop :for p :being :the :elements :of parts :do
 	 (draw p s)))))
 
-(defun draw-out-circle (x y &optional (hr 1/2))
-  (sdl:draw-aa-circle
-   (sdl:point :x x :y y)
-   (* hr 2)
-   :color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
-		     :g (floor (multi-lerp *cparam* 0   0   255 0))
-		     :b (floor (multi-lerp *cparam* 0   255 0   0)))))
-
-(defun draw-out-line (x1 y1 x2 y2)
-  (setf *cparam* (mod (+ *cparam* 0.001d0) 1d0))
-  (sdl-gfx:draw-line-*
-   (floor x1) (floor y1) (floor x2) (floor y2)
-   :color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
-		     :g (floor (multi-lerp *cparam* 0   0   255 0))
-		     :b (floor (multi-lerp *cparam* 0   255 0   0)))))
+(defgeneric particle-collide (p)
+  (:documentation "Collides the particle with the boundaries."))
 
 (defmethod particle-collide ((p rot-particle))
   (with-slots (alive pos vel theta omega) p
@@ -340,6 +381,9 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 		(< y -1d0)
 		(> y 1d0))
 	(setf alive nil)))))
+
+(defgeneric update (p dt)
+  (:documentation "Updates the moving object p with time step dt."))
 
 (defmethod update ((p rot-particle) (dt number))
   (with-slots (pos vel acc theta omega) p
