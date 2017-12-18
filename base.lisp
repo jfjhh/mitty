@@ -18,9 +18,9 @@
   ((width :initarg :width
 	  :accessor width
 	  :type 'integer)
-  (height :initarg :height
-	  :accessor height
-	  :type 'integer)))
+   (height :initarg :height
+	   :accessor height
+	   :type 'integer)))
 
 (defclass particle ()
   ((alive :initform t
@@ -38,12 +38,7 @@
 	    :accessor npoints
 	    :type 'integer)
    (points :accessor points
-	   :type 'grid:vector-double-float)))
-
-(defclass parametric-points (data-points)
-  ((func :initarg :func
-	 :accessor func
-	 :type 'function)
+	   :type 'grid:vector-double-float)
    (start :initarg :start
 	  :accessor start
 	  :type 'real)
@@ -51,10 +46,15 @@
 	:accessor end
 	:type 'real)))
 
+(defclass parametric-points (data-points)
+  ((func :initarg :func
+	 :accessor func
+	 :type 'function)))
+
 (defclass interpolation-curve ()
   ((interpolants :initarg :interpolants
-		  :accessor interpolants
-		  :type 'data-points)))
+		 :accessor interpolants
+		 :type 'data-points)))
 
 (defclass spline-curve (interpolation-curve)
   ((spline :accessor spline
@@ -100,6 +100,23 @@
 	 :initarg :genf
 	 :accessor genf)))
 
+(defmethod initialize-instance :after ((d data-points) &key)
+  (with-slots (npoints points) d
+    (setf points (grid:make-foreign-array 'double-float :dimensions npoints))))
+
+(defmethod initialize-instance :after ((p parametric-points) &key)
+  (with-slots (npoints points func start end) p
+    (loop :for i :from 0 :below npoints :do
+       (setf (grid:aref points i) (funcall func (lerp (/ i (1- npoints)) start end))))))
+
+(defmethod initialize-instance :after ((s spline-curve) &key)
+  (with-slots (spline ducks interpolants) s
+    (with-slots (npoints points start end) interpolants
+      (setf ducks (grid:make-foreign-array 'double-float :dimensions npoints))
+      (loop :for i :from 0 :below npoints :do ;; Uniform spline ducks.
+	 (setf (grid:aref ducks i) (float (lerp (/ i (1- npoints)) start end) 0d0)))
+      (setf spline (gsll:make-spline gsll:+cubic-spline-interpolation+ ducks points)))))
+
 (defgeneric screen-pos (p s &key)
   (:documentation "Maps the particle coordinates of p to screen coordinates on s."))
 
@@ -125,26 +142,6 @@
 		  0
 		  longdim))))))
 
-(defmethod initialize-instance :after ((d data-points) &key)
-  (with-slots (npoints points) d
-    (setf points (grid:make-foreign-array 'double-float :dimensions npoints))))
-
-(defmethod initialize-instance :after ((p parametric-points) &key)
-  (with-slots (npoints points func start end) p
-    (loop :for i :from 0 :below npoints :do
-       (setf (grid:aref points i) (funcall func (lerp (/ i (1- npoints)) start end))))))
-
-(defmethod initialize-instance :after ((s spline-curve) &key)
-  (with-slots (spline ducks interpolants) s
-    (with-slots (npoints points) interpolants
-      (setf ducks (grid:make-foreign-array 'double-float :dimensions npoints))
-      (loop :for i :from 0 :below npoints :do ;; Uniform spline ducks.
-	 (setf (grid:aref ducks i) (float (/ i (1- npoints)) 0d0)))
-      (setf spline (gsll:make-spline gsll:+cubic-spline-interpolation+ ducks points)))))
-
-(defgeneric generate (g dimfuncs &key start end)
-  (:documentation "Generates g with the vector results of dimfuncs on [0,1]."))
-
 (defgeneric draw (p s &key)
   (:documentation "Draws the particle p on the screen s."))
 
@@ -154,19 +151,112 @@
 (defgeneric update (p dt)
   (:documentation "Updates the moving object p with time step dt."))
 
-(defmethod evaluate ((object spline-curve) (point real) &key)
-  (gsll:evaluate (spline object) (float point 0d0)))
+(declaim (inline quadrance))
+(defun quadrance (&rest nums)
+  (declare (optimize (speed 3) (safety 1)))
+  (reduce (lambda (x y)
+	    (declare (type double-float x y))
+	    (+ x (* y y))) nums :initial-value 0d0))
+(declaim (notinline quadrance))
 
-(defmethod evaluate-derivative ((object spline-curve) (point real) &key)
-  (gsll:evaluate-derivative (spline object) (float point 0d0)))
+(declaim (inline norm))
+(defun norm (&rest nums)
+  (declare (optimize (speed 3) (safety 1))
+	   (inline quadrance sqrt))
+  (sqrt (the (double-float 0d0) (apply #'quadrance nums))))
+(declaim (notinline norm))
 
-(defmethod evaluate-second-derivative ((object spline-curve) (point real) &key)
-  (gsll:evaluate-second-derivative (spline object) (float point 0d0)))
+(declaim (inline vec-slope))
+(defun vec-slope (vec)
+  (declare (optimize (speed 3) (safety 1))
+	   (type (simple-vector 2) vec))
+  (let ((x (aref vec 0))
+	(y (aref vec 1)))
+    (declare (type double-float x y))
+    (atan y x)))
+(declaim (notinline vec-slope))
+
+(defgeneric param (p u)
+  (:documentation "Lerps u in [0,1] to p's native domain."))
+
+(defmethod param ((p interpolation-curve) (u real))
+  (when (or (< u 0) (< 1 u))
+    (error "param on ~a was called with ~a not in [0,1]." p u))
+  (with-slots (start end) (interpolants p)
+    (lerp u start end)))
+
+(defgeneric arc-length (curve u &optional v)
+  (:documentation "Calculates the arc length of curve from 0 to u,
+or between u and v if v is supplied. u and v are in [0,1]."))
+
+(defmethod arc-length ((object spline-curve) (u double-float) &optional v)
+  (let ((a (if v u 0d0))
+	(b (or v u))
+	(ds (lambda (u) (sqrt (+ 1d0 (expt (evaluate-derivative object u) 2))))))
+    (gsll:integration-qag ds a b :gauss61)))
+
+(defmethod arc-length ((object plane-curve) (u double-float) &optional v)
+  (with-slots (x y) object
+    (let ((a (if v u 0d0))
+	  (b (or v u))
+	  (ds (lambda (u) (sqrt (+ (expt (evaluate-derivative x u) 2)
+			      (expt (evaluate-derivative y u) 2))))))
+      (gsll:integration-qag ds a b :gauss61))))
+
+(defmethod evaluate ((object parametric-points) (u real) &key)
+  (with-slots (func start end) object
+    (funcall func (lerp u start end))))
+
+(defmethod evaluate ((object spline-curve) (x real) &key)
+  (gsll:evaluate (spline object) (float x 0d0)))
+
+(defmethod evaluate-derivative ((object spline-curve) (x real) &key)
+  (gsll:evaluate-derivative (spline object) (float x 0d0)))
+
+(defmethod evaluate-second-derivative ((object spline-curve) (x real) &key)
+  (gsll:evaluate-second-derivative (spline object) (float x 0d0)))
 
 (defmethod evaluate-integral ((object spline-curve)
 			      (lower-limit real)
 			      (upper-limit real) &key)
-  (gsll:evaluate-integral (spline object) (float lower-limit 0d0) (float upper-limit 0d0)))
+  (gsll:evaluate-integral
+   (spline object)
+   (float lower-limit 0d0)
+   (float upper-limit 0d0)))
+
+(defgeneric evaluate-tangent (object u)
+  (:documentation "Calculates a tangent vector to object at u."))
+
+(defmethod evaluate-tangent ((object plane-curve) (xx real))
+  (with-slots (x y) object
+    (let* ((dx (evaluate-derivative x xx))
+	   (dy (evaluate-derivative y xx))
+	   (mag (norm dx dy)))
+      (vector (/ dx mag)
+	      (/ dy mag)))))
+
+(defgeneric evaluate-normal (object u)
+  (:documentation "Calculates a normal vector to object at u."))
+
+(defmethod evaluate-normal ((object plane-curve) (u real))
+  (with-slots (x y) object
+    (let* ((dx (evaluate-derivative x u))
+	   (dy (evaluate-derivative y u))
+	   (mag (norm dx dy)))
+      (vector (/ (- dy) mag)
+	      (/ dx mag)))))
+
+(defgeneric evaluate-curvature (object u)
+  (:documentation "Calculates the curvature of curve object at u."))
+
+(defmethod evaluate-curvature ((object plane-curve) (u real))
+  (with-slots (x y) object
+    (let* ((dx (evaluate-derivative x u))
+	   (dy (evaluate-derivative y u))
+	   (cx (evaluate-second-derivative x u))
+	   (cy (evaluate-second-derivative y u)))
+      (/ (- (* dx cy) (* dy cx))
+	 (expt (+ (* dx dx) (* dy dy)) 3/2)))))
 
 (defparameter *cparam* 0d0)
 
@@ -185,42 +275,17 @@
 	   (py (cadr coords)))
       (draw-out-circle px py 1))))
 
-(defmethod draw ((g generator) (s sdl-screen) &key (hr 5) (pmin nil) (pmax nil))
-  (with-slots (width height) s
-    (with-slots (dims ndims npoints) g
-      (let* ((coords
-	      (map
-	       'vector
-	       (lambda (d)
-		 (unless pmin
-		   (setf pmin
-			 (loop :for i :from 0 :below npoints
-			    :minimizing (grid:aref d i))))
-		 (unless pmax
-		   (setf pmax
-			 (loop :for i :from 0 :below npoints
-			    :maximizing (grid:aref d i))))
-		 (grid:map-grid :source d
-				:element-function
-				(lambda (x) (screen-pos x s :min pmin :max pmax))))
-	       dims)))
-	(setf *cparam* (mod (+ *cparam* 0.005d0) 1d0))
-	(loop :for i :from 0 :below npoints :do
-	   (let ((cs (loop :for j :from 0 :below 2
-			:collecting
-			(let ((coord (grid:aref (aref coords j) i)))
-			  (if (= j 1) (- height coord) coord)))))
-	     (draw-out-circle (car cs) (cadr cs) hr)))))))
-
 (defmethod draw ((p plane-curve) (s sdl-screen) &key (n 256))
   (with-slots (width height) s
     (with-slots (x y) p
       (let* ((xs (make-array n :element-type 'double-float))
 	     (ys (make-array n :element-type 'double-float)))
 	(loop :for i :from 0 :below n :do
-	   (setf (aref xs i) (evaluate x (/ i (1- n))))
-	   (setf (aref ys i) (evaluate y (/ i (1- n)))))
-	(setf tmp0 (list xs ys))
+	   (let* ((u (/ i (1- n)))
+		  (xp (param x u))
+		  (yp (param y u)))
+	     (setf (aref xs i) (evaluate x xp)
+		   (aref ys i) (evaluate y yp))))
 	(let* ((xmin (loop :for i :from 0 :below n
 			:minimizing (aref xs i)))
 	       (xmax (loop :for i :from 0 :below n
@@ -236,134 +301,10 @@
 	       (xold (screen-pos (aref xs 0) s :min pmin :max pmax))
 	       (yold (screen-pos (aref ys 0) s :min pmin :max pmax)))
 	  (loop :for i :from 1 :below n :do
-	     (setf xnew (screen-pos (aref xs i) s :min pmin :max pmax))
-	     (setf ynew (- height (screen-pos (aref ys i) s :min pmin :max pmax)))
+	     (setf xnew (screen-pos (aref xs i) s :min pmin :max pmax)
+		   ynew (- height (screen-pos (aref ys i) s :min pmin :max pmax)))
 	     (draw-out-line xold yold xnew ynew)
-	     (setf xold xnew)
-	     (setf yold ynew)))))))
-
-(defmethod draw ((p splinerator) (s sdl-screen)
-		 &key (hr 1/2) (base nil) (clear nil) (pmin nil) (pmax nil))
-  (declare (ignore hr))
-  (when clear
-    (sdl:clear-display (sdl:color)))
-  (with-slots (width height) s
-    (with-slots (sdims ddims cdims ndims nevals) p
-      (let* ((coords
-	      (map
-	       'vector
-	       (lambda (d)
-		 (unless pmin
-		   (setf pmin
-			 (loop :for i :from 0 :below nevals
-			    :minimizing (grid:aref d i))))
-		 (unless pmax
-		   (setf pmax
-			 (loop :for i :from 0 :below nevals
-			    :maximizing (grid:aref d i))))
-		 (grid:map-grid :source d
-				:element-function
-				(lambda (x) (screen-pos x s :min pmin :max pmax))))
-	       sdims))
-	     (oldcs (loop :for j :from 0 :below 2
-		       :collecting
-		       (let ((coord (grid:aref (aref coords j) 0)))
-			 (if (= j 1) (- height coord) coord)))))
-	(loop :for i :from 1 :below nevals :do
-	   (let* ((newcs
-		   (loop :for j :from 0 :below 2
-		      :collecting
-		      (let ((coord (grid:aref (aref coords j) i)))
-			(if (= j 1) (- height coord) coord))))
-		  (x0 (car  oldcs))
-		  (y0 (cadr oldcs))
-		  (x1 (car  newcs))
-		  (y1 (cadr newcs))
-		  (dx (grid:aref (aref ddims 0) i))
-		  (dy (grid:aref (aref ddims 1) i))
-		  (cx (grid:aref (aref cdims 0) i))
-		  (cy (grid:aref (aref cdims 1) i))
-		  (vq (+ (* dx dx) (* dy dy)))
-		  (k (/ (- (* dx cy) (* dy cx)) (expt vq 3/2)))
-		  ;;(tn (atan dx dy))
-		  (mag (norm dx dy))
-		  (nx (/ (- dy) mag))
-		  (ny (/ dx mag))
-		  (nlen (* 16 k))
-		  ;;(xn (+ x1 (* nlen (cos tn))))
-		  ;;(yn (+ y1 (* nlen (sin tn))))
-		  (xn (+ x1 (* nlen nx)))
-		  (yn (+ y1 (* nlen (- ny)))))
-	     (draw-out-line x0 y0 x1 y1)
-	     (draw-out-line x1 y1 xn yn)
-	     (setf oldcs newcs)))
-	(when base
-	  (call-next-method p s :hr 2 :pmin pmin :pmax pmax))))))
-
-(declaim (inline quadrance))
-(defun quadrance (&rest nums)
-  (declare (optimize (speed 3) (safety 1)))
-  (reduce (lambda (x y)
-	    (declare (type double-float x y))
-	    (+ x (* y y))) nums :initial-value 0d0))
-(declaim (notinline quadrance))
-
-(declaim (inline norm))
-(defun norm (&rest nums)
-  (declare (optimize (speed 3) (safety 1))
-	   (inline quadrance sqrt))
-  (sqrt (the (double-float 0d0) (apply #'quadrance nums))))
-(declaim (notinline norm))
-
-(defgeneric evaluate-tangent (object point)
-  (:documentation "Calculates a tangent vector to object at point."))
-
-(defmethod evaluate-tangent ((object splinerator) (point real))
-  (with-slots (gsplines) object
-    (let* ((xspline (aref gsplines 0))
-	   (yspline (aref gsplines 1))
-	   (dx (gsll:evaluate-derivative xspline point))
-	   (dy (gsll:evaluate-derivative yspline point))
-	   (mag (norm dx dy)))
-      (vector (/ dx mag)
-	      (/ dy mag)))))
-
-(defgeneric evaluate-normal (object point)
-  (:documentation "Calculates a normal vector to object at point."))
-
-(defmethod evaluate-normal ((object splinerator) (point real))
-  (with-slots (gsplines) object
-    (let* ((xspline (aref gsplines 0))
-	   (yspline (aref gsplines 1))
-	   (dx (gsll:evaluate-derivative xspline point))
-	   (dy (gsll:evaluate-derivative yspline point))
-	   (mag (norm dx dy)))
-      (vector (/ (- dy) mag)
-	      (/ dx mag)))))
-
-(declaim (inline vec-slope))
-(defun vec-slope (vec)
-  (declare (optimize (speed 3) (safety 1))
-	   (type (simple-vector 2) vec))
-  (let ((x (aref vec 0))
-	(y (aref vec 1)))
-    (declare (type double-float x y))
-    (atan y x)))
-(declaim (notinline vec-slope))
-
-(defgeneric evaluate-curvature (object point)
-  (:documentation "Calculates the curvature of curve object at point."))
-
-(defmethod evaluate-curvature ((object splinerator) (point real))
-  (with-slots (gsplines) object
-    (let* ((xspline (aref gsplines 0))
-	   (yspline (aref gsplines 1))
-	   (dx (gsll:evaluate-derivative xspline point))
-	   (dy (gsll:evaluate-derivative yspline point))
-	   (cx (gsll:evaluate-second-derivative xspline point))
-	   (cy (gsll:evaluate-second-derivative yspline point)))
-      (/ (- (* dx cy) (* dy cx))
-	 (expt (+ (* dx dx) (* dy dy)) 3/2)))))
+	     (setf xold xnew yold ynew)))))))
 
 (defmethod draw ((l spell) (s sdl-screen) &key (clear t))
   (when clear
@@ -374,22 +315,17 @@
 	 (draw p s)))))
 
 (defun draw-out-circle (x y &optional (hr 1/2))
-  ;;(setf *cparam* (mod (+ *cparam* 0.0001d0) 1d0))
-  ;;(sdl:draw-filled-circle
-   (sdl:draw-aa-circle
-    (sdl:point :x x :y y)
-    (* hr 2)
-    :color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
-		      :g (floor (multi-lerp *cparam* 0   0   255 0))
-		      :b (floor (multi-lerp *cparam* 0   255 0   0)))))
+  (sdl:draw-aa-circle
+   (sdl:point :x x :y y)
+   (* hr 2)
+   :color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
+		     :g (floor (multi-lerp *cparam* 0   0   255 0))
+		     :b (floor (multi-lerp *cparam* 0   255 0   0)))))
 
 (defun draw-out-line (x1 y1 x2 y2)
   (setf *cparam* (mod (+ *cparam* 0.001d0) 1d0))
   (sdl-gfx:draw-line-*
-   (floor x1)
-   (floor y1)
-   (floor x2)
-   (floor y2)
+   (floor x1) (floor y1) (floor x2) (floor y2)
    :color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
 		     :g (floor (multi-lerp *cparam* 0   0   255 0))
 		     :b (floor (multi-lerp *cparam* 0   255 0   0)))))
@@ -398,46 +334,17 @@
   (with-slots (alive pos vel theta omega) p
     (let ((x (grid:aref pos 0))
 	  (y (grid:aref pos 1)))
-      #||
-      ;; Wall wrapping.
-      (when (< x -1d0)
-	(setf (grid:aref pos 0)  1d0))
-      (when (> x 1d0)
-	(setf (grid:aref pos 0) -1d0))
-      (when (< y -1d0)
-	(setf (grid:aref pos 1)  1d0))
-      (when (> y 1d0)
-	(setf (grid:aref pos 1) -1d0))
-      ||#
-
-      #||
-      ;; Wall bouncing.
-      (when (< x -1d0)
-	(setf (grid:aref pos 0) -1d0)
-	(setf theta (- pi theta)))
-      (when (> x 1d0)
-	(setf (grid:aref pos 0)  1d0)
-	(setf theta (- pi theta)))
-      (when (< y -1d0)
-	(setf (grid:aref pos 1) -1d0)
-	(setf theta (- tau theta)))
-      (when (> y 1d0)
-	(setf (grid:aref pos 1)  1d0)
-	(setf theta (- tau theta)))
-      ||#
-
-      ;; Dying.
+      ;; Particles die when off-screen.
       (when (or (< x -1d0)
 		(> x 1d0)
 		(< y -1d0)
 		(> y 1d0))
-	(setf alive nil))
-      )))
+	(setf alive nil)))))
 
 (defmethod update ((p rot-particle) (dt number))
   (with-slots (pos vel acc theta omega) p
-    (setf theta (mod (+ theta (* omega dt)) tau))
-    (setf vel (+ vel (* acc dt)))
+    (setf theta (mod (+ theta (* omega dt)) tau)
+	  vel (+ vel (* acc dt)))
     (incf (grid:aref pos 0) (* vel dt (cos theta)))
     (incf (grid:aref pos 1) (* vel dt (sin theta)))
     (particle-collide p)))
@@ -445,8 +352,8 @@
 (defmethod update ((s spell) (dt number))
   ;;(call-next-method s dt)
   (with-slots (pos vel acc theta omega) s
-    (setf theta (mod (+ theta (* omega dt)) tau))
-    (setf vel (+ vel (* acc dt)))
+    (setf theta (mod (+ theta (* omega dt)) tau)
+	  vel (+ vel (* acc dt)))
     (incf (grid:aref pos 0) (* vel dt (cos theta)))
     (incf (grid:aref pos 1) (* vel dt (sin theta)))
     (particle-collide s))
