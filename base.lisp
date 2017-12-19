@@ -184,11 +184,52 @@
 (defmethod evaluate ((object spline-curve) (x real) &key)
   (gsll:evaluate (spline object) (float x 0d0)))
 
-(defmethod evaluate-derivative ((object spline-curve) (x real) &key)
-  (gsll:evaluate-derivative (spline object) (float x 0d0)))
+(defun deriv-h (x)
+  (cond ((plusp x) (* x (sqrt double-float-epsilon)))
+	((minusp x) (* x (sqrt double-float-negative-epsilon)))
+	(t (expt (* double-float-epsilon double-float-negative-epsilon) 1/4))))
 
-(defmethod evaluate-second-derivative ((object spline-curve) (x real) &key)
-  (gsll:evaluate-second-derivative (spline object) (float x 0d0)))
+(defmethod evaluate-derivative ((object parametric-points) (u real) &key)
+  ;; Numerically calculates derivatives using finite difference methods.
+  (with-slots (start end (f func)) object
+    (if (or (< u start) (< end u))
+	(error "Cannot evaluate derivative of ~a at ~a outside of domain [~a,~a]."
+	       object u start end)
+	(let* ((h (deriv-h u))
+	       (2h (* 2 h))
+	       (left (abs (- u start)))
+	       (right (abs (- u end)))
+	       (margin (min left right)))
+	  (cond ((>= margin (* 4 h)) ; interval big enough for five-point stencil.
+		 (/ (+ (*  1 (funcall f (- u 2h)))
+		       (* -8 (funcall f (- u h)))
+		       (*  8 (funcall f (+ u h)))
+		       (* -1 (funcall f (+ u 2h))))
+		    (* 12 h)))
+		((>= margin 2h) ; interval big enough for symmetric difference quotient.
+		 (/ (+ (* -1 (funcall f (- u h)))
+		       (*  1 (funcall f (+ u h))))
+		    2h))
+		((>= right h) ; interval big enough for right difference quotient.
+		 (/ (+ (* -1 (funcall f u))
+		       (*  1 (funcall f (+ u h))))
+		    h))
+		((>= left h) ; interval big enough for left difference quotient.
+		 (/ (+ (* -1 (funcall f (- u h)))
+		       (*  1 (funcall f u)))
+		    h))
+		((not (= start end)) ; interval is tiny enough for endpoint secant.
+		 (/ (+ (* -1 (funcall f start))
+		       (*  1 (funcall f end)))
+		    (- end start)))
+		(t ; start and end are the same, so there is no change.
+		 0d0))))))
+
+(defmethod evaluate-derivative ((object spline-curve) (u real) &key)
+  (gsll:evaluate-derivative (spline object) (float u 0d0)))
+
+(defmethod evaluate-second-derivative ((object spline-curve) (u real) &key)
+  (gsll:evaluate-second-derivative (spline object) (float u 0d0)))
 
 (defmethod evaluate-integral ((object spline-curve)
 			      (lower-limit real)
@@ -201,10 +242,10 @@
 (defgeneric evaluate-tangent (object u)
   (:documentation "Calculates a tangent vector to object at u."))
 
-(defmethod evaluate-tangent ((object plane-curve) (xx real))
+(defmethod evaluate-tangent ((object plane-curve) (u real))
   (with-slots (x y) object
-    (let* ((dx (evaluate-derivative x xx))
-	   (dy (evaluate-derivative y xx))
+    (let* ((dx (evaluate-derivative x u))
+	   (dy (evaluate-derivative y u))
 	   (mag (norm dx dy)))
       (vector (/ dx mag)
 	      (/ dy mag)))))
