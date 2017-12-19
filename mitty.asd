@@ -14,6 +14,7 @@
 	       #:gsll
 	       #:bordeaux-threads)
   :components ((:file "packages")
+	       (:file "ad" :depends-on ("packages"))
 	       (:file "base" :depends-on ("packages"))
 	       (:file "sdl2" :depends-on ("packages" "base"))))
 
