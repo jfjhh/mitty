@@ -120,6 +120,46 @@
     (with-slots (npoints abscissae ordinates start end) interpolants
       (setf spline (gsll:make-spline gsll:+cubic-spline-interpolation+ abscissae ordinates)))))
 
+(defmacro as-param (body &key (a 0d0) (b 1d0) (n 64) (wrt 'u))
+  (if (eq (car body) 'as-param)
+      body
+      (let ((sym (gensym "PARAM")))
+	(labels ((%alpha-conversion% (sexp)
+		   (cond ((eq sexp wrt) sym)
+			 ((listp sexp) (mapcar #'%alpha-conversion% sexp))
+			 (t sexp))))
+	  `(make-instance 'parametric-points
+			  :start ,a
+			  :end ,b
+			  :npoints ,n
+			  :func (lambda (,sym) ,(%alpha-conversion% body)))))))
+
+(defmacro as-spline (&body body)
+  (if (eq (caar body) 'as-spline)
+      (car body)
+      `(make-instance 'spline-curve
+		      :interpolants (as-param ,@body))))
+
+(defun %split-args% (arg-list &optional prev)
+  "Destructures a list of argument lists into individual argument lists."
+  (let ((s (car arg-list))
+	(r (cdr arg-list)))
+    (cond ((and (not (keywordp s))
+		(not (keywordp (car r))))
+	   (cons (nreverse (cons s prev))
+		 (when (not (null r))
+		   (%split-args% r))))
+	  ((not (null arg-list))
+	   (%split-args% r (cons s prev))))))
+
+(defmacro as-plane (&rest args)
+  (let* ((split-args (%split-args% args))
+	 (x (car split-args))
+	 (y (cadr split-args)))
+    `(make-instance 'plane-curve
+		    :x (as-spline ,@x)
+		    :y (as-spline ,@y))))
+
 (defgeneric screen-pos (p s &key)
   (:documentation "Maps the particle coordinates of p to screen coordinates on s."))
 
@@ -383,10 +423,6 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 (defmethod arc-param ((object plane-curve) (s double-float))
   (with-slots (x y) object
     (let* ((max-iter 64)
-	   ;(xinterp (interpolants x))
-	   ;(yinterp (interpolants y))
-	   ;(start (max (start xinterp) (start yinterp)))
-	   ;(end (min (end xinterp) (end yinterp)))
 	   (start 0d0)
 	   (end 1d0)
 	   (solver
