@@ -9,6 +9,8 @@
 
 (defconstant tau (* 2 pi))
 
+(defparameter +arc-abs-error+ 1.d-3)
+
 (defclass screen ()
   ((dims :initarg dims
 	 :accessor dims
@@ -120,7 +122,7 @@
     (with-slots (npoints abscissae ordinates start end) interpolants
       (setf spline (gsll:make-spline gsll:+cubic-spline-interpolation+ abscissae ordinates)))))
 
-(defmacro as-param (body &key (a 0d0) (b 1d0) (n 64) (wrt 'u))
+(defmacro as-param (body &key (from 0d0) (to 1d0) (n 64) (wrt 'u))
   (if (eq (car body) 'as-param)
       body
       (let ((sym (gensym "PARAM")))
@@ -129,8 +131,8 @@
 			 ((listp sexp) (mapcar #'%alpha-conversion% sexp))
 			 (t sexp))))
 	  `(make-instance 'parametric-points
-			  :start ,a
-			  :end ,b
+			  :start ,from
+			  :end ,to
 			  :npoints ,n
 			  :func (lambda (,sym) ,(%alpha-conversion% body)))))))
 
@@ -363,13 +365,13 @@ or between u and v if v is supplied. u and v are in [0,1]."))
   (let ((a (if v u 0d0))
 	(b (or v u))
 	(ds (lambda (u) (sqrt (+ 1d0 (expt (evaluate-derivative object u) 2))))))
-    (gsll:integration-qag ds a b :gauss61)))
+    (gsll:integration-qag ds a b :gauss61 +arc-abs-error+)))
 
 (defmethod arc-length ((object spline-curve) (u double-float) &optional v)
   (let ((a (if v u 0d0))
 	(b (or v u))
 	(ds (lambda (u) (sqrt (+ 1d0 (expt (evaluate-derivative object u) 2))))))
-    (gsll:integration-qag ds a b :gauss61)))
+    (gsll:integration-qag ds a b :gauss61 +arc-abs-error+)))
 
 (defmethod arc-length ((object plane-curve) (u double-float) &optional v)
   (with-slots (x y) object
@@ -379,7 +381,7 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 			 (param y)
 			 (sqrt (+ (expt (evaluate-derivative* x u*) 2)
 				  (expt (evaluate-derivative* y u*) 2)))))))
-      (gsll:integration-qag ds a b :gauss61))))
+      (gsll:integration-qag ds a b :gauss61 +arc-abs-error+))))
 
 (defgeneric arc-param (object s)
   (:documentation "Finds the parameter where the arc length of object is s."))
@@ -399,7 +401,7 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 	 :for upper = (gsll:fsolver-upper solver)
 	 :do (gsll:iterate solver)
 	 :while (and (< iter max-iter)
-		     (not (gsll:root-test-interval lower upper 0d0 1d-3)))
+		     (not (gsll:root-test-interval lower upper 0d0 +arc-abs-error+)))
 	 :finally (return root)))))
 
 (defmethod arc-param ((object spline-curve) (s double-float))
@@ -417,7 +419,7 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 	 :for upper = (gsll:fsolver-upper solver)
 	 :do (gsll:iterate solver)
 	 :while (and (< iter max-iter)
-		     (not (gsll:root-test-interval lower upper 0d0 1d-3)))
+		     (not (gsll:root-test-interval lower upper 0d0 +arc-abs-error+)))
 	 :finally (return root)))))
 
 (defmethod arc-param ((object plane-curve) (s double-float))
@@ -437,7 +439,7 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 	 :for upper = (gsll:fsolver-upper solver)
 	 :do (gsll:iterate solver)
 	 :while (and (< iter max-iter)
-		     (not (gsll:root-test-interval lower upper 0d0 1d-3)))
+		     (not (gsll:root-test-interval lower upper 0d0 +arc-abs-error+)))
 	 :finally (return root)))))
 
 (defgeneric reparameterize (object method)
@@ -529,6 +531,10 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 (defgeneric draw (p s &key)
   (:documentation "Draws the particle p on the screen s."))
 
+(defmethod draw :before (p (s sdl-screen) &key (clear t))
+  (when clear
+    (sdl:clear-display (sdl:color))))
+
 (defmethod draw ((p particle) (s sdl-screen) &key)
   (with-slots (width height) s
     (let* ((coords (screen-pos p s))
@@ -536,7 +542,7 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 	   (py (cadr coords)))
       (draw-out-circle px py 1))))
 
-(defmethod draw ((p plane-curve) (s sdl-screen) &key (n 256) (base t))
+(defmethod draw ((p plane-curve) (s sdl-screen) &key (n 1024) (base t))
   (with-slots (width height) s
     (with-slots (x y) p
       (let* ((xs (make-array n :element-type 'double-float))
