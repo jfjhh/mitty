@@ -37,8 +37,10 @@
   ((npoints :initarg :npoints
 	    :accessor npoints
 	    :type 'integer)
-   (points :accessor points
-	   :type 'grid:vector-double-float)
+   (abscissae :accessor abscissae
+	      :type 'grid:vector-double-float)
+   (ordinates :accessor ordinates
+	      :type 'grid:vector-double-float)
    (start :initarg :start
 	  :accessor start
 	  :type 'real)
@@ -58,9 +60,7 @@
 
 (defclass spline-curve (interpolation-curve)
   ((spline :accessor spline
-	   :type 'gsll:spline)
-   (ducks :accessor ducks
-	  :type 'grid:vector-double-float)))
+	   :type 'gsll:spline)))
 
 (defclass plane-curve ()
   ((x :initarg :x
@@ -100,22 +100,25 @@
 	 :initarg :genf
 	 :accessor genf)))
 
+(defun %resize-data-points% (value object)
+  (with-slots (npoints abscissae ordinates) object
+    (setf abscissae (grid:make-foreign-array 'double-float :dimensions value))
+    (setf ordinates (grid:make-foreign-array 'double-float :dimensions value))
+    (setf npoints value)))
+
+(defmethod (setf npoints) ((value integer) (object data-points))
+  (%resize-data-points% value object))
+
 (defmethod initialize-instance :after ((d data-points) &key)
-  (with-slots (npoints points) d
-    (setf points (grid:make-foreign-array 'double-float :dimensions npoints))))
+  (%resize-data-points% (npoints d) d))
 
 (defmethod initialize-instance :after ((p parametric-points) &key)
-  (with-slots (npoints points func start end) p
-    (loop :for i :from 0 :below npoints :do
-       (setf (grid:aref points i) (funcall func (lerp (/ i (1- npoints)) start end))))))
+  (reparameterize p 'uniform))
 
 (defmethod initialize-instance :after ((s spline-curve) &key)
-  (with-slots (spline ducks interpolants) s
-    (with-slots (npoints points start end) interpolants
-      (setf ducks (grid:make-foreign-array 'double-float :dimensions npoints))
-      (loop :for i :from 0 :below npoints :do ;; Uniform spline ducks.
-	 (setf (grid:aref ducks i) (float (lerp (/ i (1- npoints)) start end) 0d0)))
-      (setf spline (gsll:make-spline gsll:+cubic-spline-interpolation+ ducks points)))))
+  (with-slots (spline interpolants) s
+    (with-slots (npoints abscissae ordinates start end) interpolants
+      (setf spline (gsll:make-spline gsll:+cubic-spline-interpolation+ abscissae ordinates)))))
 
 (defgeneric screen-pos (p s &key)
   (:documentation "Maps the particle coordinates of p to screen coordinates on s."))
@@ -168,14 +171,21 @@
     (atan y x)))
 (declaim (notinline vec-slope))
 
-(defgeneric param (p u)
+(defgeneric param (p &optional u)
   (:documentation "Lerps u in [0,1] to p's native domain."))
 
-(defmethod param ((p interpolation-curve) (u real))
-  (when (or (< u 0) (< 1 u))
-    (error "param on ~a was called with ~a not in [0,1]." p u))
-  (with-slots (start end) (interpolants p)
-    (lerp u start end)))
+(defmethod param ((p parametric-points) &optional u)
+  (with-slots (start end func) p
+    (cond ((not u)
+	   (if (eq func #'*) ; TODO: Better test for identity function.
+	       1d0
+	       (- end start)))
+	  ((or (< u 0) (< 1 u))
+	   (error "param on ~a was called with ~a not in [0,1]." p u))
+	  (t (lerp u start end)))))
+
+(defmethod param ((p interpolation-curve) &optional u)
+  (param (interpolants p) u))
 
 (defmethod evaluate ((object parametric-points) (u real) &key)
   (with-slots (func start end) object
@@ -184,7 +194,7 @@
 (defmethod evaluate ((object spline-curve) (x real) &key)
   (gsll:evaluate (spline object) (float x 0d0)))
 
-(defun deriv-h (x)
+(defun %deriv-h% (x)
   (cond ((plusp x) (* x (sqrt double-float-epsilon)))
 	((minusp x) (* x (sqrt double-float-negative-epsilon)))
 	(t (expt (* double-float-epsilon double-float-negative-epsilon) 1/4))))
@@ -195,7 +205,7 @@
     (if (or (< u start) (< end u))
 	(error "Cannot evaluate derivative of ~a at ~a outside of domain [~a,~a]."
 	       object u start end)
-	(let* ((h (deriv-h u))
+	(let* ((h (%deriv-h% u))
 	       (2h (* 2 h))
 	       (left (abs (- u start)))
 	       (right (abs (- u end)))
@@ -228,8 +238,40 @@
 (defmethod evaluate-derivative ((object spline-curve) (u real) &key)
   (gsll:evaluate-derivative (spline object) (float u 0d0)))
 
+(defmethod evaluate-derivative ((object plane-curve) (u real) &key)
+  (with-slots (x y) object
+    (/ (evaluate-derivative* y u)
+       (evaluate-derivative* x u))))
+
+(defgeneric evaluate-derivative* (object u &key)
+  (:documentation "Differentiates object with u in [0,1] lerped to object's native domain,
+    removing the effects of the chain rule.
+    E.g. for x=1/2, f'(x) on [0,6] would be f'(6/2) = f'(3), not 6*f'(3) from chain rule."))
+
+(defmethod evaluate-derivative* (object (u real) &key)
+  (evaluate-derivative object (param object u)))
+
+(defmethod evaluate-derivative* ((object plane-curve) (u real) &key)
+  (evaluate-derivative object u))
+
 (defmethod evaluate-second-derivative ((object spline-curve) (u real) &key)
   (gsll:evaluate-second-derivative (spline object) (float u 0d0)))
+
+(defmethod evaluate-second-derivative ((object plane-curve) (u real) &key)
+  (with-slots (x y) object
+    (/ (evaluate-second-derivative* y u)
+       (evaluate-derivative* x u))))
+
+(defgeneric evaluate-second-derivative* (object u &key)
+  (:documentation "Double differentiates object with u in [0,1] lerped to object's native domain,
+    removing the effects of the chain rule.
+    E.g. for x=1/2, f\"(x) on [0,6] would be f\"(6/2) = f\"(3), not 36*f'(3) from chain rule."))
+
+(defmethod evaluate-second-derivative* (object (u real) &key)
+  (evaluate-second-derivative object (param object u)))
+
+(defmethod evaluate-second-derivative* ((object plane-curve) (u real) &key)
+  (evaluate-second-derivative object u))
 
 (defmethod evaluate-integral ((object spline-curve)
 			      (lower-limit real)
@@ -244,8 +286,8 @@
 
 (defmethod evaluate-tangent ((object plane-curve) (u real))
   (with-slots (x y) object
-    (let* ((dx (evaluate-derivative x u))
-	   (dy (evaluate-derivative y u))
+    (let* ((dx (evaluate-derivative* x u))
+	   (dy (evaluate-derivative* y u))
 	   (mag (norm dx dy)))
       (vector (/ dx mag)
 	      (/ dy mag)))))
@@ -255,8 +297,8 @@
 
 (defmethod evaluate-normal ((object plane-curve) (u real))
   (with-slots (x y) object
-    (let* ((dx (evaluate-derivative x u))
-	   (dy (evaluate-derivative y u))
+    (let* ((dx (evaluate-derivative* x u))
+	   (dy (evaluate-derivative* y u))
 	   (mag (norm dx dy)))
       (vector (/ (- dy) mag)
 	      (/ dx mag)))))
@@ -266,16 +308,22 @@
 
 (defmethod evaluate-curvature ((object plane-curve) (u real))
   (with-slots (x y) object
-    (let* ((dx (evaluate-derivative x u))
-	   (dy (evaluate-derivative y u))
-	   (cx (evaluate-second-derivative x u))
-	   (cy (evaluate-second-derivative y u)))
+    (let* ((dx (evaluate-derivative* x u))
+	   (dy (evaluate-derivative* y u))
+	   (cx (evaluate-second-derivative* x u))
+	   (cy (evaluate-second-derivative* y u)))
       (/ (- (* dx cy) (* dy cx))
 	 (expt (+ (* dx dx) (* dy dy)) 3/2)))))
 
 (defgeneric arc-length (curve u &optional v)
   (:documentation "Calculates the arc length of curve from 0 to u,
 or between u and v if v is supplied. u and v are in [0,1]."))
+
+(defmethod arc-length ((object parametric-points) (u double-float) &optional v)
+  (let ((a (if v u 0d0))
+	(b (or v u))
+	(ds (lambda (u) (sqrt (+ 1d0 (expt (evaluate-derivative object u) 2))))))
+    (gsll:integration-qag ds a b :gauss61)))
 
 (defmethod arc-length ((object spline-curve) (u double-float) &optional v)
   (let ((a (if v u 0d0))
@@ -287,12 +335,32 @@ or between u and v if v is supplied. u and v are in [0,1]."))
   (with-slots (x y) object
     (let ((a (if v u 0d0))
 	  (b (or v u))
-	  (ds (lambda (u) (sqrt (+ (expt (evaluate-derivative x u) 2)
-			      (expt (evaluate-derivative y u) 2))))))
+	  (ds (lambda (u*) (* (param x)
+			 (param y)
+			 (sqrt (+ (expt (evaluate-derivative* x u*) 2)
+				  (expt (evaluate-derivative* y u*) 2)))))))
       (gsll:integration-qag ds a b :gauss61))))
 
 (defgeneric arc-param (object s)
   (:documentation "Finds the parameter where the arc length of object is s."))
+
+(defmethod arc-param ((object parametric-points) (s double-float))
+  (with-slots (start end) object
+    (let ((max-iter 64)
+	  (solver
+	   (gsll:make-one-dimensional-root-solver-f
+	    gsll:+brent-fsolver+
+	    (lambda (u) (- (arc-length object u) s))
+	    start
+	    end)))
+      (loop :for iter :from 0
+	 :for root = (gsll:solution solver)
+	 :for lower = (gsll:fsolver-lower solver)
+	 :for upper = (gsll:fsolver-upper solver)
+	 :do (gsll:iterate solver)
+	 :while (and (< iter max-iter)
+		     (not (gsll:root-test-interval lower upper 0d0 1d-3)))
+	 :finally (return root)))))
 
 (defmethod arc-param ((object spline-curve) (s double-float))
   (with-slots (start end) (interpolants object)
@@ -315,10 +383,12 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 (defmethod arc-param ((object plane-curve) (s double-float))
   (with-slots (x y) object
     (let* ((max-iter 64)
-	   (xinterp (interpolants x))
-	   (yinterp (interpolants y))
-	   (start (max (start xinterp) (start yinterp)))
-	   (end (min (end xinterp) (end yinterp)))
+	   ;(xinterp (interpolants x))
+	   ;(yinterp (interpolants y))
+	   ;(start (max (start xinterp) (start yinterp)))
+	   ;(end (min (end xinterp) (end yinterp)))
+	   (start 0d0)
+	   (end 1d0)
 	   (solver
 	    (gsll:make-one-dimensional-root-solver-f
 	     gsll:+brent-fsolver+
@@ -333,6 +403,66 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 	 :while (and (< iter max-iter)
 		     (not (gsll:root-test-interval lower upper 0d0 1d-3)))
 	 :finally (return root)))))
+
+(defgeneric reparameterize (object method)
+  (:documentation "Reparametrizes object with method. Supported methods are:
+    UNIFORM : Constant steps in the parameter.
+    ARC-LENGTH : Constant steps in arc length."))
+
+(defmethod reparameterize :before ((object parametric-points) (method (eql 'uniform)))
+  (with-slots (npoints abscissae start end func) object
+    (loop :for i :from 0 :below npoints :do
+       (setf (grid:aref abscissae i) (lerp (/ i (1- npoints)) start end)))))
+
+(defmethod reparameterize :before ((object parametric-points) (method (eql 'arc-length)))
+  (with-slots (npoints abscissae start end func) object
+    (let ((l (arc-length object start end)))
+      (loop :for i :from 0 :below npoints :do
+	 (setf (grid:aref abscissae i) (arc-param object (* l (/ i (1- npoints)))))))))
+
+(defmethod reparameterize ((object parametric-points) method)
+  (with-slots (npoints abscissae ordinates func) object
+    (loop :for i :from 0 :below npoints :do
+       (setf (grid:aref ordinates i) (funcall func (grid:aref abscissae i))))
+    object))
+
+(defmethod reparameterize ((object interpolation-curve) method)
+  (reparameterize (interpolants object) method))
+
+(defmethod reparameterize ((object spline-curve) method)
+  (with-slots (spline interpolants) object
+    (with-slots (abscissae ordinates) interpolants
+      (call-next-method)
+      (setf spline (gsll:make-spline gsll:+cubic-spline-interpolation+ abscissae ordinates)))))
+
+(defmethod reparameterize :before ((object plane-curve) method)
+  (with-slots (x y) object
+    (with-accessors ((xpoints npoints)) (interpolants x)
+      (with-accessors ((ypoints npoints)) (interpolants y)
+	(cond ((< xpoints ypoints)
+	       (setf xpoints ypoints))
+	      ((> xpoints ypoints)
+	       (setf ypoints xpoints)))))))
+
+(defmethod reparameterize ((object plane-curve) (method (eql 'uniform)))
+  (reparameterize (x object) method)
+  (reparameterize (y object) method)
+  object)
+
+(defmethod reparameterize ((object plane-curve) (method (eql 'arc-length)))
+  (with-slots (x y) object
+    (with-slots ((xis interpolants)) x
+      (with-slots ((yis interpolants)) y
+	(with-slots ((xabsc abscissae)) xis
+	  (with-slots ((yabsc abscissae) npoints) yis
+	    (let ((l (arc-length object 0d0 1d0)))
+	      (loop :for i :from 0 :below npoints :do
+		 (let ((abscissa (arc-param object (* l (/ i (1- npoints))))))
+		   (setf (grid:aref xabsc i) (param xis abscissa))
+		   (setf (grid:aref yabsc i) (param yis abscissa))))
+	      (reparameterize x nil)
+	      (reparameterize y nil)
+	      object)))))))
 
 (defparameter *cparam* 0d0)
 
@@ -370,7 +500,7 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 	   (py (cadr coords)))
       (draw-out-circle px py 1))))
 
-(defmethod draw ((p plane-curve) (s sdl-screen) &key (n 256))
+(defmethod draw ((p plane-curve) (s sdl-screen) &key (n 256) (base t))
   (with-slots (width height) s
     (with-slots (x y) p
       (let* ((xs (make-array n :element-type 'double-float))
@@ -399,7 +529,22 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 	     (setf xnew (screen-pos (aref xs i) s :min pmin :max pmax)
 		   ynew (- height (screen-pos (aref ys i) s :min pmin :max pmax)))
 	     (draw-out-line xold yold xnew ynew)
-	     (setf xold xnew yold ynew)))))))
+	     (setf xold xnew yold ynew))
+	  (when base
+	    (let* ((xis (interpolants x))
+		   (yis (interpolants y))
+		   (xod (ordinates xis))
+		   (yod (ordinates yis))
+		   (nx (npoints xis))
+		   (ny (npoints yis)))
+	      (if (not (= nx ny))
+		  (error "Components of ~a have different npoints: ~a and ~a"
+			 p nx ny)
+		  (loop :for i :from 0 :below (min nx ny) :do
+		     (draw-out-circle (screen-pos (grid:aref xod i) s :min pmin :max pmax)
+				      (- height
+					 (screen-pos (grid:aref yod i) s :min pmin :max pmax))
+				      1))))))))))
 
 (defmethod draw ((l spell) (s sdl-screen) &key (clear t))
   (when clear
