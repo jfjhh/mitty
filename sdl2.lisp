@@ -68,6 +68,7 @@
 			   (sdl:push-quit-event)))
 	(:video-expose-event () (sdl:update-display))
 	(:idle ()
+	       #||
 	       ;; Particle stuff.
 	       (incf *time* 0.01d0)
 	       (setf (slot-value *bullet* 'omega)
@@ -77,7 +78,6 @@
 	       (update *bullet* 0.1d0)
 	       (draw *bullet* *screen* :clear nil)
 
-	       #||
 	       (update *sp* 3d0)
 	       (draw *sp* *screen*)
 	       ||#

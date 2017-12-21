@@ -587,13 +587,16 @@ or between u and v if v is supplied. u and v are in [0,1]."))
   (with-slots (width height) s
     (with-slots (x y) p
       (let* ((xs (make-array n :element-type 'double-float))
-	     (ys (make-array n :element-type 'double-float)))
+	     (ys (make-array n :element-type 'double-float))
+	     (ns (make-array n :element-type '(simple-vector 2))))
 	(loop :for i :from 0 :below n :do
 	   (let* ((u (/ i (- n 1d0)))
 		  (xp (param x u))
 		  (yp (param y u)))
 	     (setf (aref xs i) (the double-float (evaluate x xp))
-		   (aref ys i) (the double-float (evaluate y yp)))))
+		   (aref ys i) (the double-float (evaluate y yp))
+		   (aref ns i) (evaluate-normal p u))))
+	(setf tmp0 ns)
 	(let* ((xmin (the double-float (loop :for i :from 0 :below n
 					  :minimizing (aref xs i))))
 	       (xmax (the double-float (loop :for i :from 0 :below n
@@ -609,10 +612,15 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 	       (xold (screen-pos (aref xs 0) s :min pmin :max pmax))
 	       (yold (screen-pos (aref ys 0) s :min pmin :max pmax)))
 	  (loop :for i :from 1 :below n :do
-	     (setf xnew (screen-pos (aref xs i) s :min pmin :max pmax)
-		   ynew (- height (screen-pos (aref ys i) s :min pmin :max pmax)))
-	     (draw-out-line xold yold xnew ynew)
-	     (setf xold xnew yold ynew))
+	     (let* ((normal (aref ns i))
+		    (xnorm (elt normal 0))
+		    (ynorm (elt normal 1))
+		    (nlen (* 12 (evaluate-curvature p (/ i (- n 1d0))))))
+	       (setf xnew (screen-pos (aref xs i) s :min pmin :max pmax)
+		     ynew (- height (screen-pos (aref ys i) s :min pmin :max pmax)))
+	       (draw-out-line xold yold xnew ynew)
+	       (draw-out-line xnew ynew (+ xnew (* nlen xnorm)) (+ ynew (* -1 nlen ynorm)))
+	       (setf xold xnew yold ynew)))
 	  (when base
 	    (let* ((xis (interpolants x))
 		   (yis (interpolants y))
