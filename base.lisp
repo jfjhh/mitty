@@ -656,7 +656,7 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 
 (defmethod update ((p rot-particle) (dt double-float))
   (with-slots (pos vel acc theta omega) p
-    (declare (type double-float pos vel acc theta omega))
+    (declare (type double-float vel acc theta omega))
     (setf theta (mod (+ theta (* omega dt)) tau)
 	  vel (+ vel (* acc dt)))
     (incf (grid:aref pos 0) (* vel dt (cos theta)))
@@ -665,7 +665,7 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 
 (defmethod update ((s spell) (dt double-float))
   (with-slots (pos vel acc theta omega) s
-    (declare (type double-float pos vel acc theta omega))
+    (declare (type double-float vel acc theta omega))
     (setf theta (mod (+ theta (* omega dt)) tau)
 	  vel (+ vel (* acc dt)))
     (incf (grid:aref pos 0) (* vel dt (cos theta)))
