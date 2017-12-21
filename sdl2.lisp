@@ -5,6 +5,8 @@
 
 (in-package #:mitty)
 
+(declaim (optimize speed))
+
 (defparameter *xs* '(0 1/4 1/2 3/4 1))
 (defparameter *ys* '(0 1/4 1/2 3/4 1))
 
@@ -14,10 +16,13 @@
 (defparameter *bullet* nil)
 (defparameter *sp* nil)
 
-(defparameter *bscreen*
+(defparameter *screen*
   (make-instance 'sdl-screen
-		 :width 1024
-		 :height 1024))
+		 :width 512d0
+		 :height 512d0))
+
+(defun clear (&optional (color (sdl:color :r 0 :g 0 :b 0)))
+  (sdl:clear-display color))
 
 (defun reset ()
   (sdl:clear-display (sdl:color :r 0 :g 0 :b 0))
@@ -46,51 +51,11 @@
 		       :omega 0d0
 		       :theta (+ 0.1 (float (/ pi 2) 0d0)))))
 
-(defun func->bspline (a b n f &optional (nverts (* n 2)))
-  (let* ((fstep (/ (- b a) n))
-	 (xarr
-	  (grid:make-foreign-array
-	   'double-float
-	   :initial-contents
-	   (loop :for i :from a :below b :by fstep :collecting i)))
-	 (yarr
-	  (grid:make-foreign-array
-	   'double-float
-	   :initial-contents
-	   (loop :for i :from a :below b :by fstep :collecting (funcall f i))))
-	 (spline (gsll:make-spline gsll:+cubic-spline-interpolation+ xarr yarr)))
-    (let* ((begin (grid:aref xarr 0))
-	   (end (grid:aref xarr (1- n)))
-	   (vstep (/ (- end begin) nverts)))
-      (loop :for xi :from begin :below end :by vstep
-	 :collecting (list xi (gsll:evaluate spline xi))))))
-
-(defun draw-verts (xs ys)
-  (loop :for x :in xs :for y :in ys :do
-     (sdl:draw-filled-circle
-      (sdl:point :x  x :y y)
-      2
-      :color (sdl:color :r 128 :g 0 :b 128)
-      :stroke-color (sdl:color :r 0 :g 0 :b 255))))
-
-(defun draw-verts* (ps)
-  (loop :for p :in ps :do
-     (let ((x (car p))
-	   (y (cadr p)))
-       (sdl:draw-filled-circle
-	(sdl:point :x  x :y y)
-	2
-	:color (sdl:color :r 128 :g 0 :b 128)
-	:stroke-color (sdl:color :r 0 :g 0 :b 255)))))
-
-(defun to-points (xs ys)
-  (mapcar (lambda (x y) (sdl:point :x x :y y)) xs ys))
-
-(defun run-sdl-thread (&optional (func #'bezier) (name "Mitty"))
+(defun run-sdl-thread (&optional (func #'mitty-main) (name "Mitty"))
   (bt:make-thread func :name name))
 
-(defmethod bezier ()
-  (with-slots (width height) *bscreen*
+(defun mitty-main ()
+  (with-slots (width height) *screen*
     (sdl:with-init ()
       (sdl:window width height :title-caption "Mitty | SDL2 Test")
       (setf (sdl:frame-rate) 60)
@@ -111,12 +76,12 @@
 			(* 3 (sin (* 3 *time*)))
 			(* 5 (cos (* 50 *time*)))))
 	       (update *bullet* 0.01d0)
-	       (draw *bullet* *bscreen*)
+	       (draw *bullet* *screen*)
 	       ||#
 
 	       #||
 	       (update *sp* 3d0)
-	       (draw *sp* *bscreen*)
+	       (draw *sp* *screen*)
 	       (setf *cparam* (mod (+ *cparam* 0.01d0) 1d0))
 	       ||#
 
