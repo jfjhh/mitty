@@ -5,19 +5,21 @@
 
 (in-package #:mitty)
 
+(declaim (optimize (speed 3) (safety 1) (debug 0) (compilation-speed 0)))
+
 (defclass ad ()
-  ((val :initarg :val
-	:reader val
+  ((adval :initarg :adval
+	:reader adval
 	:type number)
-   (der :initarg :der
-	:reader der
+   (adder :initarg :adder
+	:reader adder
 	:type number)))
 
 (defmethod print-object ((object ad) stream)
-  (format stream "#<AD ~a~%     ~a>" (val object) (der object)))
+  (format stream "#<AD ~a~%     ~a>" (adval object) (adder object)))
 
-(defmethod ad ((val number) &optional (der 0))
-  (make-instance 'ad :val val :der der))
+(defmethod ad ((adval number) &optional (adder 0))
+  (make-instance 'ad :adval adval :adder adder))
 
 (defmethod ad ((a ad) &optional b)
   (declare (ignore b))
@@ -26,9 +28,9 @@
 (defmethod wrt ((a number))
   (ad a 1))
 
-(defmethod val ((a number)) a)
+(defmethod adval ((a number)) a)
 
-(defmethod der ((a number)) 0)
+(defmethod adder ((a number)) 0)
 
 (defparameter *%ads%*
   '((+    . ad-+)
@@ -54,7 +56,7 @@
 (defun %class-arg-lambda-list% (class lambda-list)
   (mapcar
    (lambda (s) (if (and (symbolp s)
-		   (notany (curry #'eq s) lambda-list-keywords))
+		   (notany (the function (curry #'eq s)) lambda-list-keywords))
 	      (list s class)
 	      s))
    lambda-list))
@@ -69,10 +71,10 @@
   `(lambda ,args ,@(%ad-sexp% body)))
 
 (defmethod ad-+ (&rest as)
-  (ad (apply #'+ (mapcar #'val as)) (apply #'+ (mapcar #'der as))))
+  (ad (apply #'+ (mapcar #'adval as)) (apply #'+ (mapcar #'adder as))))
 
 (defmethod ad-- (&rest as)
-  (ad (apply #'- (mapcar #'val as)) (apply #'- (mapcar #'der as))))
+  (ad (apply #'- (mapcar #'adval as)) (apply #'- (mapcar #'adder as))))
 
 (defun %ad-*% (aval ader bval bder)
   (ad (* aval bval)
@@ -81,11 +83,11 @@
 (defmethod ad-* (&rest as)
   (let ((l (length as)))
     (if (< l 2)
-	(ad (apply #'* (mapcar #'val as))
+	(ad (apply #'* (mapcar #'adval as))
 	    (if (zerop l) 0 1))
 	(let* ((a (car as))
 	       (b (cadr as))
-	       (p (%ad-*% (val a) (der a) (val b) (der b))))
+	       (p (%ad-*% (adval a) (adder a) (adval b) (adder b))))
 	  (if (= l 2)
 	      p
 	      (apply #'ad-* p (cddr as)))))))
@@ -98,19 +100,19 @@
 (defmethod ad-/ ((a ad) &rest bs)
   (let ((l (length bs)))
     (cond ((zerop l)
-	   (with-accessors ((val val) (der der)) a
-	     (ad (/ val)
-		 (/ (- der) (* val val)))))
+	   (with-accessors ((adval adval) (adder adder)) a
+	     (ad (/ adval)
+		 (/ (- adder) (* adval adval)))))
 	  ((= l 1)
 	   (let ((b (car bs)))
-	     (%ad-/% (val a) (der a) (val b) (der b))))
+	     (%ad-/% (adval a) (adder a) (adval b) (adder b))))
 	  ((> l 1)
 	   (let ((b (apply #'ad-* bs)))
-	     (%ad-/% (val a) (der a) (val b) (der b)))))))
+	     (%ad-/% (adval a) (adder a) (adval b) (adder b)))))))
 
 (defmethod ad-expt ((a ad) (b ad))
-  (with-accessors ((aval val) (ader der)) a
-    (with-accessors ((bval val) (bder der)) b
+  (with-accessors ((aval adval) (ader adder)) a
+    (with-accessors ((bval adval) (bder adder)) b
       (ad (expt aval bval)
 	  (if (zerop bder)
 	      (* bval (expt aval (- bval 1)) ader)
@@ -118,15 +120,15 @@
 		 (+ (* bval ader) (* aval (log (* aval bder))))))))))
 
 (defmethod ad-exp ((a ad))
-  (with-accessors ((val val) (der der)) a
-    (let ((v (exp val)))
+  (with-accessors ((adval adval) (adder adder)) a
+    (let ((v (exp adval)))
       (ad v
-	  (* der v)))))
+	  (* adder v)))))
 
 (defmethod ad-log ((a ad) &optional b)
-  (with-accessors ((aval val) (ader der)) a
+  (with-accessors ((aval adval) (ader adder)) a
     (if b
-	(with-accessors ((bval val) (bder der)) b
+	(with-accessors ((bval adval) (bder adder)) b
 	  (if (zerop bder)
 	      (ad (log aval bval)
 		  (/ ader bval aval))
@@ -144,31 +146,31 @@
   (/ (tan number)))
 
 (defmethod ad-sin ((a ad))
-  (with-accessors ((val val) (der der)) a
-    (ad (sin val)
-	(* der (cos val)))))
+  (with-accessors ((adval adval) (adder adder)) a
+    (ad (sin adval)
+	(* adder (cos adval)))))
 
 (defmethod ad-cos ((a ad))
-  (with-accessors ((val val) (der der)) a
-    (ad (cos val)
-	(* der (- (sin val))))))
+  (with-accessors ((adval adval) (adder adder)) a
+    (ad (cos adval)
+	(* adder (- (sin adval))))))
 
 (defmethod ad-tan ((a ad))
-  (with-accessors ((val val) (der der)) a
-    (ad (tan val)
-	(* der (expt (cos val) -2)))))
+  (with-accessors ((adval adval) (adder adder)) a
+    (ad (tan adval)
+	(* adder (expt (cos adval) -2)))))
 
 (defmethod ad-csc ((a ad))
-  (with-accessors ((val val) (der der)) a
-    (ad (csc val)
-	(* der (cot val) (csc val)))))
+  (with-accessors ((adval adval) (adder adder)) a
+    (ad (csc adval)
+	(* adder (cot adval) (csc adval)))))
 
 (defmethod ad-sec ((a ad))
-  (with-accessors ((val val) (der der)) a
-    (ad (sec val)
-	(* der (tan val) (sec val)))))
+  (with-accessors ((adval adval) (adder adder)) a
+    (ad (sec adval)
+	(* adder (tan adval) (sec adval)))))
 
 (defmethod ad-cot ((a ad))
-  (with-accessors ((val val) (der der)) a
-    (ad (cot val)
-	(* der (- (expt (sin val) -2))))))
+  (with-accessors ((adval adval) (adder adder)) a
+    (ad (cot adval)
+	(* adder (- (expt (sin adval) -2))))))

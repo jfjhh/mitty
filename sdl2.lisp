@@ -37,14 +37,14 @@
 		 (declare (ignore x))
 		 (with-slots (nups pos) s
 		   (make-instance 'rot-particle
-				  :pos (grid:copy pos)
+				  :pos (copy pos)
 				  :vel 0.0005d0
 				  :acc 0d0
 				  :theta (* 0.5d0 nups)
 				  :omega 0d0)))))
   (setf *bullet*
 	(make-instance 'rot-particle
-		       :pos (grid:make-foreign-array
+		       :pos (make-foreign-array
 			     'double-float
 			     :initial-contents '(0d0 0d0))
 		       :vel 0.01d0
@@ -72,9 +72,9 @@
 	       ;; Particle stuff.
 	       (incf *time* 0.01d0)
 	       (setf (slot-value *bullet* 'omega)
-		     (+ 0d0
-			(* 30d0 (sin (* 3d0 *time*)))
-			(* 50d0 (cos (* 50d0 *time*)))))
+	       (+ 0d0
+	       (* 30d0 (sin (* 3d0 *time*)))
+	       (* 50d0 (cos (* 50d0 *time*)))))
 	       (update *bullet* 0.1d0)
 	       (draw *bullet* *screen* :clear nil)
 

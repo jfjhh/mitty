@@ -5,11 +5,11 @@
 
 (defpackage #:mitty
   (:use #:common-lisp
+	#:gsll
 	#:alexandria
 	#:lispbuilder-sdl
 	#:lispbuilder-sdl-gfx
-	#:bordeaux-threads
-	#:gsll)
+	#:bordeaux-threads)
   (:shadowing-import-from #:lispbuilder-sdl-gfx
 			  #:*default-font*)
   (:shadowing-import-from #:gsll
@@ -18,5 +18,13 @@
 			  #:mean
 			  #:variance
 			  #:median
-			  #:standard-deviation))
+			  #:standard-deviation)
+  (:shadowing-import-from #:antik
+			  #:a
+			  #:g
+			  #:w
+			  #:distance
+			  #:rotate
+			  #:volume))
 
+(antik:make-user-package :mitty)

@@ -8,13 +8,13 @@
   :version "0.0.1"
   :author "Alex Striff"
   :licence "MIT License"
-  :depends-on (#:alexandria
+  :depends-on (#:antik
+	       #:gsll
+	       #:alexandria
 	       #:lispbuilder-sdl
 	       #:lispbuilder-sdl-gfx
-	       #:gsll
 	       #:bordeaux-threads)
   :components ((:file "packages")
 	       (:file "ad" :depends-on ("packages"))
 	       (:file "base" :depends-on ("packages"))
 	       (:file "sdl2" :depends-on ("packages" "base"))))
-

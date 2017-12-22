@@ -18,7 +18,7 @@
 (defclass screen ()
   ((dims :initarg dims
 	 :accessor dims
-	 :type 'grid:vector-double-float)))
+	 :type 'vector-double-float)))
 
 (defclass sdl-screen ()
   ((width :initarg :width
@@ -32,21 +32,21 @@
   ((alive :initform t
 	  :accessor alive
 	  :type '(boolean null))
-   (pos :initform (grid:make-foreign-array
+   (pos :initform (make-foreign-array
 		   'double-float
 		   :initial-contents '(0d0 0d0))
 	:initarg :pos
 	:accessor pos
-	:type 'grid:vector-double-float)))
+	:type 'vector-double-float)))
 
 (defclass data-points ()
   ((npoints :initarg :npoints
 	    :accessor npoints
 	    :type 'integer)
    (abscissae :accessor abscissae
-	      :type 'grid:vector-double-float)
+	      :type 'vector-double-float)
    (ordinates :accessor ordinates
-	      :type 'grid:vector-double-float)
+	      :type 'vector-double-float)
    (start :initarg :start
 	  :accessor start
 	  :type 'double-float)
@@ -108,8 +108,8 @@
 
 (defun %resize-data-points% (value object)
   (with-slots (npoints abscissae ordinates) object
-    (setf abscissae (grid:make-foreign-array 'double-float :dimensions value))
-    (setf ordinates (grid:make-foreign-array 'double-float :dimensions value))
+    (setf abscissae (make-foreign-array 'double-float :dimensions value))
+    (setf ordinates (make-foreign-array 'double-float :dimensions value))
     (setf npoints value)))
 
 (defmethod (setf npoints) ((value integer) (object data-points))
@@ -186,8 +186,8 @@
 (defmethod screen-pos ((p particle) (s sdl-screen) &key)
   (with-slots (pos) p
     (with-slots (width height) s
-      (let ((px (grid:aref pos 0))
-	    (py (grid:aref pos 1)))
+      (let ((px (aref pos 0))
+	    (py (aref pos 1)))
 	(declare (type double-float px py width height))
 	(list (lerp (/ (+ px 1d0) 2d0) 0d0 width)
 	      (lerp (- 1d0 (/ (+ py 1d0) 2d0)) 0d0 height))))))
@@ -406,9 +406,9 @@ or between u and v if v is supplied. u and v are in [0,1]."))
     (let ((a (if v u 0d0))
 	  (b (or v u))
 	  (ds (lambda (u*) (* (the double-float (param x))
-			 (the double-float (param y))
-			 (sqrt (+ (expt (the double-float (evaluate-derivative* x u*)) 2)
-				  (expt (the double-float (evaluate-derivative* y u*)) 2)))))))
+			      (the double-float (param y))
+			      (sqrt (+ (expt (the double-float (evaluate-derivative* x u*)) 2)
+				       (expt (the double-float (evaluate-derivative* y u*)) 2)))))))
       (gsll:integration-qag ds a b :gauss15 +arc-abs-error+ +arc-rel-error+))))
 
 (defgeneric arc-param (object s)
@@ -481,7 +481,7 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 	     (type double-float start end)
 	     (type (function (double-float) double-float) func))
     (loop :for i :from 0 :below npoints :do
-       (setf (grid:aref abscissae i) (lerp (/ i (- npoints 1d0)) start end)))))
+       (setf (aref abscissae i) (lerp (/ i (- npoints 1d0)) start end)))))
 
 (defmethod reparameterize :before ((object parametric-points) (method (eql 'arc-length)))
   (with-slots (npoints abscissae start end func) object
@@ -490,14 +490,14 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 	     (type (function (double-float) double-float) func))
     (let ((l (the double-float (arc-length object start end))))
       (loop :for i :from 0 :below npoints :do
-	 (setf (grid:aref abscissae i) (arc-param object (* l (/ i (- npoints 1d0)))))))))
+	 (setf (aref abscissae i) (arc-param object (* l (/ i (- npoints 1d0)))))))))
 
 (defmethod reparameterize ((object parametric-points) method)
   (with-slots (npoints abscissae ordinates func) object
     (declare (type fixnum npoints)
 	     (type (function (double-float) double-float) func))
     (loop :for i :from 0 :below npoints :do
-       (setf (grid:aref ordinates i) (funcall func (grid:aref abscissae i))))
+       (setf (aref ordinates i) (funcall func (aref abscissae i))))
     object))
 
 (defmethod reparameterize ((object interpolation-curve) method)
@@ -535,8 +535,8 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 	      (loop :for i :from 0 :below npoints :do
 		 (let ((abscissa (the double-float
 				      (arc-param object (* l (/ i (- npoints 1d0)))))))
-		   (setf (grid:aref xabsc i) (param xis abscissa))
-		   (setf (grid:aref yabsc i) (param yis abscissa))))
+		   (setf (aref xabsc i) (param xis abscissa))
+		   (setf (aref yabsc i) (param yis abscissa))))
 	      (reparameterize x nil)
 	      (reparameterize y nil)
 	      object)))))))
@@ -596,7 +596,6 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 	     (setf (aref xs i) (the double-float (evaluate x xp))
 		   (aref ys i) (the double-float (evaluate y yp))
 		   (aref ns i) (evaluate-normal p u))))
-	(setf tmp0 ns)
 	(let* ((xmin (the double-float (loop :for i :from 0 :below n
 					  :minimizing (aref xs i))))
 	       (xmax (the double-float (loop :for i :from 0 :below n
@@ -632,9 +631,9 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 		  (error "Components of ~a have different npoints: ~a and ~a"
 			 p nx ny)
 		  (loop :for i :from 0 :below (min nx ny) :do
-		     (draw-out-circle (screen-pos (grid:aref xod i) s :min pmin :max pmax)
+		     (draw-out-circle (screen-pos (aref xod i) s :min pmin :max pmax)
 				      (- height
-					 (screen-pos (grid:aref yod i) s :min pmin :max pmax))
+					 (screen-pos (aref yod i) s :min pmin :max pmax))
 				      1))))))))))
 
 (defmethod draw ((l spell) (s sdl-screen) &key (clear t))
@@ -650,8 +649,8 @@ or between u and v if v is supplied. u and v are in [0,1]."))
 
 (defmethod particle-collide ((p rot-particle))
   (with-slots (alive pos vel theta omega) p
-    (let ((x (the double-float (grid:aref pos 0)))
-	  (y (the double-float (grid:aref pos 1))))
+    (let ((x (the double-float (aref pos 0)))
+	  (y (the double-float (aref pos 1))))
       ;; Particles die when off-screen.
       (when (or (< x -1d0)
 		(> x 1d0)
@@ -667,8 +666,8 @@ or between u and v if v is supplied. u and v are in [0,1]."))
     (declare (type double-float vel acc theta omega))
     (setf theta (mod (+ theta (* omega dt)) tau)
 	  vel (+ vel (* acc dt)))
-    (incf (grid:aref pos 0) (* vel dt (cos theta)))
-    (incf (grid:aref pos 1) (* vel dt (sin theta)))
+    (incf (aref pos 0) (* vel dt (cos theta)))
+    (incf (aref pos 1) (* vel dt (sin theta)))
     (particle-collide p)))
 
 (defmethod update ((s spell) (dt double-float))
@@ -676,8 +675,8 @@ or between u and v if v is supplied. u and v are in [0,1]."))
     (declare (type double-float vel acc theta omega))
     (setf theta (mod (+ theta (* omega dt)) tau)
 	  vel (+ vel (* acc dt)))
-    (incf (grid:aref pos 0) (* vel dt (cos theta)))
-    (incf (grid:aref pos 1) (* vel dt (sin theta)))
+    (incf (aref pos 0) (* vel dt (cos theta)))
+    (incf (aref pos 1) (* vel dt (sin theta)))
     (particle-collide s))
   (with-slots (parts nups genf) s
     (incf nups)
