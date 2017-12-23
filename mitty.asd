@@ -16,5 +16,7 @@
 	       #:bordeaux-threads)
   :components ((:file "packages")
 	       (:file "ad" :depends-on ("packages"))
+	       (:file "interval" :depends-on ("packages"))
+	       (:file "diffgeo" :depends-on ("packages" "interval"))
 	       (:file "base" :depends-on ("packages"))
 	       (:file "sdl2" :depends-on ("packages" "base"))))

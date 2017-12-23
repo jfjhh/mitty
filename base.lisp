@@ -16,7 +16,7 @@
 (defparameter +arc-rel-error+ 1d-3)
 
 (defclass screen ()
-  ((dims :initarg dims
+  ((dims :initarg :dims
 	 :accessor dims
 	 :type 'vector-double-float)))
 
