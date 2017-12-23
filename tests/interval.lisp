@@ -392,7 +392,6 @@
      (lambda (test-list)
        (let* ((test-interval (car test-list))
 	      (target (cdr test-list)))
-	 (format t "RUNNING~%")
 	 (lisp-unit:assert-equal
 	  (abs (if (eq test-interval '+empty-interval+)
 		   +empty-interval+
@@ -423,7 +422,6 @@
 	      (test-interval (car test-cons))
 	      (test-num (cdr test-cons))
 	      (target (cdr test-list)))
-	 (format t "RUNNING~%")
 	 (lisp-unit:assert-true
 	  (not
 	   (xor
