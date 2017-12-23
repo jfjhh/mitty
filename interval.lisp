@@ -28,6 +28,10 @@
        :documentation "t if the interval is closed at b, nil if open.")))
 
 (defvar +empty-interval+ (make-instance 'interval))
+(defvar +full-interval+ (make-instance 'interval
+				       :a gsll:+negative-infinity+
+				       :b gsll:+positive-infinity+
+				       :ac nil :bc nil))
 
 (defmethod print-object ((object interval) stream)
   "Prints the interval object to stream, in a human-readable way."
@@ -38,6 +42,10 @@
 (defmethod print-object ((object (eql +empty-interval+)) stream)
   (print-unreadable-object (object stream :type t)
     (format stream "Empty")))
+
+(defmethod print-object ((object (eql +full-interval+)) stream)
+  (print-unreadable-object (object stream :type t)
+    (format stream "(-∞, ∞)")))
 
 (defun interval (a b &optional (ac t) (bc t))
   "Creates an interval from a to b, given a <= b."
@@ -69,6 +77,10 @@
   "Returns t if x is the empty interval."
   (eq +empty-interval+ x))
 
+(defmethod %fullp% ((x interval))
+  "Returns t if x is the full interval."
+  (eq +full-interval+ x))
+
 (defvar %ltrels% (cons #'<= #'<))
 (defvar %gtrels% (cons #'>= #'>))
 
@@ -89,7 +101,7 @@
 	    (%choose-rel% (bc x) (ac y) rels inc)
 	    (%choose-rel% (bc x) (bc y) rels inc))))
 
-(defmethod unite ((x interval) (y interval))
+(defmethod %unite% ((x interval) (y interval))
   "Returns the union of the intervals x and y,
    or +empty-interval+ if the intervals are not coincident."
   (or (when (%emptyp% x) y)
@@ -113,7 +125,15 @@
 		   ((< xb yb) (bc y))
 		   (t (bc x))))))))
 
-(defmethod intersect ((x interval) (y interval))
+(defun unite (&rest intervals)
+  "Returns the union of the given intervals,
+   or +empty-interval+ if the intervals are not coincident."
+  (cond ((null intervals) +empty-interval+)
+	((not (cdr intervals)) (car intervals))
+	((not (cddr intervals)) (%unite% (car intervals) (cadr intervals)))
+	(t (apply #'unite (%unite% (car intervals) (cadr intervals)) (cddr intervals)))))
+
+(defmethod %intersect% ((x interval) (y interval))
   "Returns the intersection of the intervals x and y,
    or +empty-interval+ if the intervals are not coincident."
   (or (when (or (%emptyp% x) (%emptyp% y)) +empty-interval+)
@@ -135,6 +155,16 @@
 	     (cond ((= xb yb) (and (bc x) (bc y)))
 		   ((< xb yb) (bc x))
 		   (t (bc y))))))))
+
+(defun intersect (&rest intervals)
+  "Returns the intersection of the given intervals,
+   or +empty-interval+ if the intervals are not coincident."
+  (if (null intervals)
+      +full-interval+
+      (cond ((%emptyp% (car intervals)) +empty-interval+)
+	    ((not (cdr intervals)) (car intervals))
+	    ((not (cddr intervals)) (%intersect% (car intervals) (cadr intervals)))
+	    (t (apply #'intersect (%intersect% (car intervals) (cadr intervals)) (cddr intervals))))))
 
 (defmethod abs ((x interval))
   "Returns the length of the interval."

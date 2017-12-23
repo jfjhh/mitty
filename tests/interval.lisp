@@ -191,6 +191,7 @@
 
 (lisp-unit:define-test unite
   (prog1 t
+    ;; All binary combinations of intervals.
     (mapc
      (lambda (test-list)
        (let* ((test-intervals (car test-list))
@@ -209,7 +210,17 @@
 	   (if (eq target '+empty-interval+)
 	       +empty-interval+
 	       (apply #'interval target))))))
-     %test-union-intervals%)))
+     %test-union-intervals%)
+    ;; Multiple intervals.
+    (lisp-unit:assert-true
+     (interval= (unite)
+		+empty-interval+))
+    (lisp-unit:assert-true
+     (interval= (unite (interval 0 1))
+		(interval 0 1)))
+    (lisp-unit:assert-true
+     (interval= (unite (interval 0 1) (interval 1 2) (interval 2 3))
+		(interval 0 3)))))
 
 (defparameter %test-intersect-intervals%
   '(;; Overlapping Interval Intersections.
@@ -344,6 +355,7 @@
 
 (lisp-unit:define-test intersect
   (prog1 t
+    ;; All binary combinations of intervals.
     (mapc
      (lambda (test-list)
        (let* ((test-intervals (car test-list))
@@ -362,7 +374,17 @@
 	   (if (eq target '+empty-interval+)
 	       +empty-interval+
 	       (apply #'interval target))))))
-     %test-intersect-intervals%)))
+     %test-intersect-intervals%)
+    ;; Multiple intervals.
+    (lisp-unit:assert-true
+     (interval= (intersect)
+		+full-interval+))
+    (lisp-unit:assert-true
+     (interval= (intersect (interval 0 1))
+		(interval 0 1)))
+    (lisp-unit:assert-true
+     (interval= (intersect (interval 0 3) (interval 1 4) (interval 2 5))
+		(interval 2 3)))))
 
 (defparameter %test-abs-intervals%
   '(((-3 -1 t   t  )  . 2)
