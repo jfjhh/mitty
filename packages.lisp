@@ -5,11 +5,16 @@
 
 (defpackage #:mitty
   (:use #:common-lisp
+	#:closer-mop
 	#:gsll
 	#:alexandria
 	#:lispbuilder-sdl
 	#:lispbuilder-sdl-gfx
 	#:bordeaux-threads)
+  (:shadowing-import-from #:closer-mop
+			  #:standard-generic-function
+			  #:defmethod
+			  #:defgeneric)
   (:shadowing-import-from #:lispbuilder-sdl-gfx
 			  #:*default-font*)
   (:shadowing-import-from #:gsll
@@ -25,6 +30,11 @@
 			  #:w
 			  #:distance
 			  #:rotate
-			  #:volume))
+			  #:volume)
+  (:shadowing-import-from #:common-lisp
+			  #:/
+			  #:*
+			  #:-
+			  #:+))
 
 (antik:make-user-package :mitty)

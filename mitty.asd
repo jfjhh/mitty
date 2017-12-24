@@ -8,7 +8,8 @@
   :version "0.0.1"
   :author "Alex Striff"
   :licence "MIT License"
-  :depends-on (#:antik
+  :depends-on (#:closer-mop
+	       #:antik
 	       #:gsll
 	       #:alexandria
 	       #:lispbuilder-sdl

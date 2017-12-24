@@ -33,19 +33,20 @@
 				       :b gsll:+positive-infinity+
 				       :ac nil :bc nil))
 
-(defmethod print-object ((object interval) stream)
+(defmethod interval-string ((object interval))
   "Prints the interval object to stream, in a human-readable way."
-  (print-unreadable-object (object stream :type t)
-    (format stream "~:[(~;[~]~a, ~a~:[)~;]~]"
-	    (ac object) (a object) (b object) (bc object))))
+  (format nil "~:[(~;[~]~a, ~a~:[)~;]~]"
+	  (ac object) (a object) (b object) (bc object)))
 
-(defmethod print-object ((object (eql +empty-interval+)) stream)
-  (print-unreadable-object (object stream :type t)
-    (format stream "Empty")))
+(defmethod interval-string ((object (eql +empty-interval+)))
+  "Empty")
 
-(defmethod print-object ((object (eql +full-interval+)) stream)
+(defmethod interval-string ((object (eql +full-interval+)))
+  "(-∞, ∞)")
+
+(defmethod print-object :around ((object interval) stream)
   (print-unreadable-object (object stream :type t)
-    (format stream "(-∞, ∞)")))
+    (format stream "~a" (interval-string object))))
 
 (defun interval (a b &optional (ac t) (bc t))
   "Creates an interval from a to b, given a <= b."
