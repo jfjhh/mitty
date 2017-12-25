@@ -386,7 +386,7 @@
      (interval= (intersect (interval 0 3) (interval 1 4) (interval 2 5))
 		(interval 2 3)))))
 
-(defparameter %test-abs-intervals%
+(defparameter %test-span-intervals%
   '(((-3 -1 t   t  )  . 2)
     ((-3 -1 nil t  )  . 2)
     ((-3 -1 t   nil)  . 2)
@@ -408,18 +408,18 @@
     ((+1 +1 t   nil)  . 0)
     (+empty-interval+ . 0)))
 
-(lisp-unit:define-test interval-abs
+(lisp-unit:define-test interval-span
   (prog1 t
     (mapc
      (lambda (test-list)
        (let* ((test-interval (car test-list))
 	      (target (cdr test-list)))
 	 (lisp-unit:assert-equal
-	  (abs (if (eq test-interval '+empty-interval+)
-		   +empty-interval+
-		   (apply #'interval test-interval)))
+	  (span (if (eq test-interval '+empty-interval+)
+		    +empty-interval+
+		    (apply #'interval test-interval)))
 	  target)))
-     %test-abs-intervals%)))
+     %test-span-intervals%)))
 
 (defparameter %test-in-interval-intervals%
   '((((0 2 t   t  )    . 0) . t  )

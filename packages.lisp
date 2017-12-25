@@ -37,4 +37,12 @@
 			  #:-
 			  #:+))
 
+(setf antik::*antik-user-shadow-symbols*
+      '(maximizing maximize minimizing minimize multiplying antik:multiply summing
+	antik:sum for time length decf incf signum round floor coerce < <= > >= = max
+	min zerop minusp plusp abs exp log expt sqrt tanh cosh sinh atan acos asin tan
+	cos sin aref polar-to-rectangular rectangular-to-polar acceleration
+	psi knots row column sum multiply iterate))
+
 (antik:make-user-package :mitty)
+

@@ -167,7 +167,7 @@
 	    ((not (cddr intervals)) (%intersect% (car intervals) (cadr intervals)))
 	    (t (apply #'intersect (%intersect% (car intervals) (cadr intervals)) (cddr intervals))))))
 
-(defmethod abs ((x interval))
+(defmethod span ((x interval))
   "Returns the length of the interval."
   (if (%emptyp% x)
       0
