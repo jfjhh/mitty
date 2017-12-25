@@ -58,7 +58,7 @@
 (defmethod print-object ((r rlambda) stream)
   (print-unreadable-object (r stream :type t)
     (format stream "of class ~a over ~a in ~(~a~):~%  ~{~(~a~)~^ ~}"
-	    (%class-string% r) (interval-string (domain r)) (args r) (sfunc r))))
+	    (%class-string% (c r)) (interval-string (domain r)) (args r) (sfunc r))))
 
 (defmacro rlambda (args &body body)
   `(make-instance 'rlambda :args ',args :sfunc ',body :domain +full-interval+))
