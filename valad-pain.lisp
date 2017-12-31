@@ -79,7 +79,8 @@ TODO: (Macro or func?) to `let` a list like ((x 1) (xd 3)) ... but with gensyms:
    (and (listp sexp)
 	(let ((rule (%adlookup% (car sexp))))
 	  (when rule
-	    (mapc (lambda (a) (%once-only-arg% a)) (cdr sexp))
+      (dolist (a (cdr sexp))
+        (%once-only-arg% a))
 	    rule)))
    (error "Cannot compute AD for sexp of class ~a wrt ~a: ~a" class wrt sexp)))
 

@@ -7,6 +7,8 @@
 
 (declaim (optimize (speed 1) (safety 1) (debug 3) (compilation-speed 0)))
 
+(defparameter *max-class* 2)
+
 (defparameter %ad-rules%
   '(((+ x y) (+ xd yd) (+ xdd ydd))
     ((* x y) (+ (* x yd) (* y xd)) (+ (* y xdd) (* 2 xd yd) (* x ydd)))
@@ -17,12 +19,51 @@
     ((expt x n) (* xd n (expt x (- n 1))) (* n (expt x (- n 2)) (+ (* x xdd) (* (- n 1) xd xd))))
     ((exp x) (* xd (exp x)) (* (exp x) (+ xdd (* xd xd))))))
 
+#||
+TODO: INTEGRATE.
+
+(defun integrate (a b r x)
+  (multiple-value-bind (a ad) (funcall a x)
+    (multiple-value-bind (b bd) (funcall b x)
+      (gsll:integration-qag r a b :gauss15))))
+
+(defun dintegrate (a b r x)
+  (multiple-value-bind (a ad) (funcall a x)
+    (multiple-value-bind (b bd) (funcall b x)
+      (- (* bd (funcall r b)) (* ad (funcall r a))))))
+||#
+
 (defparameter %ad-funcs%
   (mapcar #'caar %ad-rules%))
+
+(defparameter %ad-nargs%
+  '(+ *))
+
+(defparameter %ad-nargs-ids%
+  '(0 1))
 
 (defun %nrep% (x n)
   (when (plusp n)
     (cons x (%nrep% x (1- n)))))
+
+(defun %nest-nargs% (sexp &optional (binary t))
+  (cond ((cddr sexp)
+	 (append (list (car sexp) (cadr sexp))
+		 (list (%nest-nargs% (cons (car sexp) (cddr sexp))))))
+	((cdr sexp)
+	 (if binary (cadr sexp) sexp))
+	(t
+	 (let ((pos (position (car sexp) %ad-nargs%)))
+	   (and pos (nth pos %ad-nargs-ids%))))))
+
+(defun %ad-nsexp% (sexp)
+  (if (and sexp (listp sexp))
+      (let ((new
+	     (if (some (curry #'eq (car sexp)) %ad-nargs%)
+		 (%nest-nargs% sexp)
+		 sexp)))
+	(cons (car new) (mapcar #'%ad-nsexp% (cdr new))))
+      sexp))
 
 (defun %adargs% (args class)
   (mapcan
@@ -47,32 +88,56 @@
 (defun %defadrule% (func class &optional (fast nil))
   (let* ((rule (%adlookup% func))
 	 (args (%adargs% (cdar rule) class))
-	 (type (if fast 'double-float 'real)))
+	 (type (if fast 'double-float 'real))
+	 (name (format-symbol t "C~d~a" class func)))
     (when args
-      (compile (symbolicate "C" (format nil "~d" class) func)
+      (compile name
 	       `(lambda ,args
 		  (declare (type ,type ,@args)
 			   (optimize (speed 3) (debug 0) (compilation-speed 0)))
 		  (values ,@(mapcar (curry #'list 'the type)
 				    (subseq rule 0 (1+ class)))))))))
 
-(dotimes (c (1+ 2))
-  (mapc (lambda (x) (%defadrule% x c t)) %ad-funcs%))
+(defun %ad-diff% (sexp class wrt)
+  (cond
+    ((listp sexp)
+     (let* ((fsym (car sexp))
+	    (func (find fsym %ad-funcs%))
+	    (rbound (and (symbolp fsym)
+			 (boundp fsym)
+			 (eq 'rlambda (type-of (eval fsym))))))
+       (if (or rbound func)
+	   `(multiple-value-call
+		,(if rbound
+		     `(car (last (cfuncs (eval ,fsym))))
+		     `(fdefinition ',(format-symbol t "C~d~a" class func)))
+	      ,@(mapcar (lambda (s) (%ad-diff% s class wrt)) (cdr sexp)))
+	   (cons (car sexp)
+		 (mapcar (lambda (s) (%ad-diff% s class wrt)) (cdr sexp))))))
+    ((eq wrt sexp)
+     `(values ,@(%adargs% (list wrt) class)))
+    ((or (numberp sexp))
+     `(values ,@(subseq (list sexp 0d0 0d0) 0 (1+ class))))
+    (t (warn "AD stage %ad-diff% cannot process sexp ~a" sexp)
+       sexp)))
 
 (defun %ad-sexp% (sexp class wrt)
-  (cond ((listp sexp)
-	 (let ((func (find (car sexp) %ad-funcs%)))
-	   (if func
-	       `(multiple-value-call
-		    #',(symbolicate "C" (format nil "~d" class) func)
-		  ,@(mapcar (lambda (s) (%ad-sexp% s class wrt)) (cdr sexp)))
-	       (mapcar (lambda (s) (%ad-sexp% s class wrt)) sexp))))
-	((eq wrt sexp)
-	 `(values ,@(subseq (list wrt 1d0 0d0) 0 (1+ class))))
-	((or (numberp sexp) (symbolp sexp))
-	 `(values ,@(subseq (list sexp 0d0 0d0) 0 (1+ class))))
-	(t (format t "~a" sexp) sexp)))
+  (%ad-diff% (%ad-nsexp% sexp) class wrt))
 
 (defmacro %adlambda% (class wrt &body body)
-  `(lambda (,wrt)
+  `(lambda ,(%adargs% (list wrt) class)
      ,@(mapcar (lambda (s) (%ad-sexp% s class wrt)) body)))
+
+(defmacro %adlambda*% (class wrt &body body)
+  `(lambda (,wrt)
+     (multiple-value-call (%adlambda% ,class ,wrt ,@body) (wrt ,wrt ,class))))
+
+(declaim (inline wrt))
+(defun wrt (x &optional (c *max-class*))
+  (values-list
+   (subseq (append (list x 1) (%nrep% 0 (- *max-class* 1)))
+	   0 (1+ c))))
+
+(dotimes (c (1+ *max-class*))
+  (dolist (x %ad-funcs%)
+    (%defadrule% x c)))
