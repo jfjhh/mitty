@@ -1,5 +1,5 @@
 ;;;;
-;;;; Value-based, extensible automatic differentiation.
+;;;; Multiple-value-based, extensible automatic differentiation.
 ;;;; Alex Striff
 ;;;;
 
@@ -8,6 +8,7 @@
 (declaim (optimize (speed 1) (safety 1) (debug 3) (compilation-speed 0)))
 
 (defparameter *max-class* 2)
+(defparameter *adrule-fast* t)
 
 (defparameter %ad-rules%
   '(((+ x y) (+ xd yd) (+ xdd ydd))
@@ -18,20 +19,6 @@
     ((tan x) (* xd (tan x) (/ (cos x))) (* (expt (cos x) -2) (+ xdd (* 2 xd xd (tan x)))))
     ((expt x n) (* xd n (expt x (- n 1))) (* n (expt x (- n 2)) (+ (* x xdd) (* (- n 1) xd xd))))
     ((exp x) (* xd (exp x)) (* (exp x) (+ xdd (* xd xd))))))
-
-#||
-TODO: INTEGRATE.
-
-(defun integrate (a b r x)
-  (multiple-value-bind (a ad) (funcall a x)
-    (multiple-value-bind (b bd) (funcall b x)
-      (gsll:integration-qag r a b :gauss15))))
-
-(defun dintegrate (a b r x)
-  (multiple-value-bind (a ad) (funcall a x)
-    (multiple-value-bind (b bd) (funcall b x)
-      (- (* bd (funcall r b)) (* ad (funcall r a))))))
-||#
 
 (defparameter %ad-funcs%
   (mapcar #'caar %ad-rules%))
@@ -68,8 +55,8 @@ TODO: INTEGRATE.
 (defun %adargs% (args class)
   (mapcan
    (lambda (x) (mapcar
-	   (lambda (n) (apply #'symbolicate x (%nrep% 'd n)))
-	   (iota (1+ class))))
+		(lambda (n) (apply #'symbolicate x (%nrep% 'd n)))
+		(iota (1+ class))))
    args))
 
 (defun %adexp% (ad-rule class)
@@ -85,7 +72,7 @@ TODO: INTEGRATE.
       (nth pos %ad-rules%)))
   (find s %ad-rules% :test (lambda (x y) (eq x (caar y)))))
 
-(defun %defadrule% (func class &optional (fast nil))
+(defun %defadrule% (func class &optional (fast *adrule-fast*))
   (let* ((rule (%adlookup% func))
 	 (args (%adargs% (cdar rule) class))
 	 (type (if fast 'double-float 'real))

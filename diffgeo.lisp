@@ -7,172 +7,140 @@
 
 (declaim (optimize (speed 1) (safety 1) (debug 3) (compilation-speed 0)))
 
-(defparameter +ralpha+ "α")
+(deftype rfunc () '(or rinterpolation))
 
-(defparameter +infinity-class+ -2)
-(defparameter +analytic-class+ -1)
-
-(defparameter *default-class* 2)
-
-(defclass rlambda ()
-  ((sfunc :initarg :sfunc
-	  :accessor sfunc
-	  :type list
-	  :documentation "The symbolic expression of the function.")
-   (args :initarg :args
-	 :accessor args
-	 :type list
-	 :documentation "The bound variables of the symbolic function.")
-   (func :initform nil
-	 :initarg :func
-	 :accessor func
-	 :type function
-	 :documentation "The funcallable real function.")
-   (cfuncs :accessor cfuncs
-	   :type list
-	   :documentation "A list of AD functions of increasing differentiability class.")
-   (c :initform *default-class*
-      :initarg :c
-      :accessor c
-      :type (or integer symbol)
-      :documentation "The differentiability class of the function.")
-   (domain :initarg :domain
+(defclass curve ()
+  ((domain :initform (interval 0d0 1d0)
+	   :initarg :domain
 	   :accessor domain
 	   :type interval
-	   :documentation "The domain of the function."))
-  (:metaclass c2mop:funcallable-standard-class))
+	   :documentation "The domain of the curve.")
+   (size :initarg :size
+	 :accessor size
+	 :type integer
+	 :documentation "The number of knots in the curve.")
+   (c :initarg :c
+      :accessor c
+      :type (or integer symbol)
+      :documentation "The differentiability class of the curve.")
+   (knots :initarg :knots
+	  :accessor knots
+	  :type vector-double-float
+	  :documentation "The knots of the curve.")))
 
-(defun %funcall-rlambda-sexp% (sexp)
-  (if (listp sexp)
-   (let ((func (car sexp)))
-     (if (and (symbolp func)
-		(boundp func)
-		(eq 'rlambda (type-of (eval func))))
-	 `(funcall ,func ,@(mapcar #'%funcall-rlambda-sexp% (cdr sexp)))
-	 (cons func (mapcar #'%funcall-rlambda-sexp% (cdr sexp)))))
-   sexp))
+(defmethod print-object ((c curve) stream)
+  (print-unreadable-object (c stream :type t)
+    (format stream "of class ~a over ~a with ~a interpolants"
+	    (%class-string% (c c)) (interval-string (domain c)) (size c))))
 
-(defun compile-rlambda (r)
-  (with-slots (sfunc args func cfuncs c) r
-    (setf cfuncs
-	  (mapcar (lambda (s) (eval `(%adlambda% ,s ,(car args) ,@sfunc)))
-		  (iota (if (plusp c) c 3) :start 1))) ; Do finitely many cfuncs for C^∞ or C^ω.
-    (setf func (compile nil `(lambda ,args
-			       (declare (optimize (speed 1) (debug 3) (compilation-speed 0)))
-			       ,@(mapcar #'%funcall-rlambda-sexp% sfunc)))))) ; Like a Lisp-1.
+(defgeneric curve-point (curve u)
+  (:documentation "Gets the point on the curve at u."))
 
-(defmethod initialize-instance :after ((r rlambda) &key)
-  (with-slots (sfunc args func domain) r
-    (unless func
-      (compile-rlambda r))
-    (c2mop:set-funcallable-instance-function r func)))
+(defgeneric tangent (curve u)
+  (:documentation "Gets the tangent vector to curve at u."))
 
-(defun %class-string% (c)
-  (case c
-    (+infinity-class+ "∞")
-    (+analytic-class+ "ω")
-    (t (format nil "~d" c))))
+(defgeneric normal (curve u)
+  (:documentation "Gets the normal vector to curve at u."))
 
-(defmethod print-object ((r rlambda) stream)
-  (print-unreadable-object (r stream :type t)
-    (format stream "of class ~a over ~a in ~(~a~):~%  ~{~(~a~)~^ ~}"
-	    (%class-string% (c r)) (interval-string (domain r)) (args r) (sfunc r))))
+(defgeneric curvature (curve u)
+  (:documentation "Gets the signed curvature of curve at u."))
 
-(defmacro rlambda (args &body body)
-  `(make-instance 'rlambda :args ',args :sfunc ',body :domain +full-interval+))
+(defgeneric curve-map (function curve &key)
+  (:documentation "Transforms the curve with function."))
 
-(defun %rlambda% (args &rest body)
-  (make-instance 'rlambda :args args :sfunc body :domain +full-interval+))
+(defgeneric local-map (function curve param i &key)
+  (:documentation "Transforms the curve at param with (function param curve)."))
 
-(defmacro defrfun (name lambda-list &body body)
-  `(progn
-     (when (fboundp ',name)
-       (warn "Redefining real function ~s." ',name))
-     (setf (fdefinition ',name)
-	   (rlambda ,lambda-list ,@body))
-     ',name))
+(defmethod curve-map (function (curve curve) &rest args &key)
+  (with-slots (size knots) curve
+    (dotimes (i size)
+      (let ((param (grid:aref knots i)))
+	(apply #'local-map function curve param i args)))))
 
-(defmacro defrfun* (name lambda-list &body body)
-  `(progn
-     (when (fboundp ',name)
-       (warn "Redefining real function ~s." ',name))
-     (setf (fdefinition ',name)
-	   (rlambda ,lambda-list ,@body))
-     ',name))
+(defclass plane-curve (curve)
+  ((x :initarg :x
+      :accessor x
+      :type rfunc
+      :documentation "The abscissa of the plane curve.")
+   (y :initarg :y
+      :accessor y
+      :type rfunc
+      :documentation "The ordinate of the plane curve.")))
 
-(defun %cnfunc% (r &optional (n (c r)))
-  (nth (1- n) (cfuncs r)))
+(defun make-plane-curve (x y &optional knots)
+  (let ((xs (size x))
+	(ys (size y))
+	(domain (intersect (domain x) (domain y))))
+    (when (/= xs ys)
+      (error "Size mismatch between x and y in make-plane-curve:~%~a~%~a" x y))
+    (make-instance 'plane-curve
+		   :x x
+		   :y y
+		   :domain domain
+		   :size xs
+		   :c (min (c x) (c y))
+		   :knots (or knots (make-uniform-knots xs (a domain) (b domain))))))
 
-(defun %defcncall% (n)
-  (let ((name (format-symbol t "C~dCALL" n)))
-    (compile name
-	     `(lambda (function &rest arguments)
-		(apply (nth ,(1- n) (cfuncs function)) arguments)))))
+(defmethod curve-point ((curve plane-curve) u)
+  (grid (evaluate (x curve) u)
+	(evaluate (y curve) u)))
 
-(dotimes (n *default-class*) (%defcncall% (1+ n)))
+(defmethod tangent ((curve plane-curve) u)
+  (grid (evaluate-derivative (x curve) u)
+	(evaluate-derivative (y curve) u)))
 
-(defun cncall (function &rest arguments)
-  (apply (%cnfunc% function (c function)) arguments))
+(defmethod normal ((curve plane-curve) u)
+  (grid (- (evaluate-derivative (y curve) u))
+	(evaluate-derivative (x curve) u)))
 
-(defun %defdncall% (n)
-  (let ((name (format-symbol t "D~dCALL" n)))
-    (compile name
-	     `(lambda (function &rest arguments)
-		(nth-value ,n (apply (nth ,(1- n) (cfuncs function)) arguments))))))
+(defmethod curvature ((curve plane-curve) u)
+  (multiple-value-bind (x xd xdd) (evaluate-second-derivative* (x curve) u)
+    (declare (ignore x))
+    (multiple-value-bind (y yd ydd) (evaluate-second-derivative* (y curve) u)
+      (declare (ignore y))
+      (/ (- (* xd ydd) (* yd xdd)) (expt (+ (* xd xd) (* yd yd)) 3/2)))))
 
-(dotimes (n *default-class*) (%defdncall% (1+ n)))
+(defmethod curve-map :after (function (curve plane-curve) &key (impure nil))
+  (when impure
+    (reinterpolate (x curve))
+    (reinterpolate (y curve))))
 
-(defun dncall (function &rest arguments)
-  (car (last (multiple-value-list
-	      (apply (%cnfunc% function (c function)) arguments)))))
+(defmethod local-map (function (curve plane-curve) param i &key (impure nil))
+  (let ((point (funcall function curve param i)))
+    (when impure
+      (setf (grid:aref (ya (x curve)) i) (grid:aref point 0))
+      (setf (grid:aref (ya (y curve)) i) (grid:aref point 1)))))
 
-(defun %alpha-convert% (bound new rlambda)
-  (with-slots (args sfunc) rlambda
-    (let ((sub (list (cons bound new))))
-      (setf args (sublis sub args))
-      (setf sfunc (sublis sub sfunc)))))
+(defun displace (curve function)
+  (flet ((disp (c u i)
+	   (with-slots (x y) c
+	     (let ((current (grid (grid:aref (ya x) i)
+				  (grid:aref (ya y) i))))
+	       (antik:+ current (funcall function c u i))))))
+    (curve-map #'disp curve :impure t)))
 
-(defun %flatten% (sexp &optional back acc)
-  (cond ((consp sexp) (%flatten% (car sexp) (cons (cdr sexp) back) acc))
-	(sexp (%flatten% (car back) (cdr back) (cons sexp acc)))
-	(back (%flatten% (car back) (cdr back) acc))
-	(t (nreverse acc))))
+(defun minimize-curvature (curve u i)
+  (declare (ignore i))
+  (let* ((n (normalize (normal curve u)))
+	 (k (curvature curve u))
+	 (sgn (if (plusp k) 1 -1))
+	 (s (* sgn (clamp (* (abs k) 0.005d0) 0d0 0.1d0))))
+    (antik:* n s)))
 
-(defun rcompose (f g &optional (pos 0))
-  (with-slots ((fargs args)) f
-    (with-slots ((gargs args)) g
-      (let* ((sub (nth pos fargs))
-	     (fshadows (remove sub fargs)))
-	(dolist (a gargs)
-	  (when (some (curry #'eq a) fshadows)
-	    (%alpha-convert% a (gensym +ralpha+) g))
-	  gargs)
-	(let ((gfunc (sfunc g)))
-	  (apply #'%rlambda%
-		 (%flatten% (sublis `((,sub . ,gargs)) fargs))
-		 (sublis
-		  `((,sub . ,(if (not (cdr gfunc))
-				 (car gfunc)
-				 (cons 'progn gfunc))))
-		  (sfunc f))))))))
+(defun jiggle (amount)
+  (let ((amount (clamp amount 0d0 0.5d0)))
+    (flet ((disp () (- (random 1.0d0) 0.5d0)))
+      (lambda (&rest args)
+	(declare (ignore args))
+	(antik:* (normalize (grid (disp) (disp)))
+		 amount)))))
 
-(defun %single-arg% (f)
-  (with-slots (args sfunc) f
-    (let ((arg (gensym +ralpha+)))
-      (apply #'%rlambda% (list arg)
-	     (sublis (mapcar (lambda (x) (cons x arg)) args) sfunc)))))
-
-(defun %ngensyms% (n)
-  (make-gensym-list n +ralpha+))
-
-(defun rcombine (func &rest rs)
-  (let* ((args (%ngensyms% (length rs)))
-	 (base (%rlambda% args `(funcall ,func ,@args)))
-	 (arg 0))
-    (reduce (lambda (f g) (prog1 (rcompose f g arg) (incf arg)))
-	    rs :initial-value base)))
-
-(defun rlerp (a b)
-  (let ((r (%rlambda% '(v) `(+ (* (- 1 v) ,a) (* v ,b)))))
-    (setf (domain r) (interval 0 1))
-    r)))
+(defun draw-deform (curve function &optional (n 1))
+  (dotimes (i n)
+    (sdl:draw-rectangle-* 0 0
+			  (floor (width *screen*))
+			  (floor (height *screen*))
+			  :color (sdl:color)
+			  :alpha 32)
+    (displace curve function)
+    (draw curve *screen* :n (* 3 (size curve)) :clear nil :base t :normals t)))
