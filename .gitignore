@@ -1,5 +1,6 @@
 *#*lisp*
 *.lisp~
-*.fasl
+*.asd~
 *.ttf
+research
 
