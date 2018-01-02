@@ -7,7 +7,7 @@
 
 (declaim (optimize (speed 1) (safety 1) (debug 3) (compilation-speed 0)))
 
-(deftype rnum () 'real)
+(deftype rnum () 'double-float)
 
 (defclass interval ()
   ((a :initarg :a
@@ -25,7 +25,8 @@
    (bc :initarg :bc
        :accessor bc
        :type boolean
-       :documentation "t if the interval is closed at b, nil if open.")))
+       :documentation "t if the interval is closed at b, nil if open."))
+  (:documentation "Real interval."))
 
 (defvar +empty-interval+ (make-instance 'interval))
 (defvar +full-interval+ (make-instance 'interval
@@ -61,8 +62,8 @@
   "Returns first value t if intervals are equal (mathematically),
    otherwise nil. Returns second value t if endpoints of interval
    are equal, otherwise nil."
-  (let ((p (%emptyp% x))
-	(q (%emptyp% y)))
+  (let ((p (emptyp x))
+	(q (emptyp y)))
     (cond ((and p q) (values t t))
 	  ((not (or p q))
 	   (let ((endpoints-equal (and (= (a x) (a y))
@@ -74,11 +75,11 @@
 	      endpoints-equal)))
 	  (t (values nil nil)))))
 
-(defmethod %emptyp% ((x interval))
+(defmethod emptyp ((x interval))
   "Returns t if x is the empty interval."
   (eq +empty-interval+ x))
 
-(defmethod %fullp% ((x interval))
+(defmethod fullp ((x interval))
   "Returns t if x is the full interval."
   (eq +full-interval+ x))
 
@@ -105,8 +106,8 @@
 (defmethod %unite% ((x interval) (y interval))
   "Returns the union of the intervals x and y,
    or +empty-interval+ if the intervals are not coincident."
-  (or (when (%emptyp% x) y)
-      (when (%emptyp% y) x)
+  (or (when (emptyp x) y)
+      (when (emptyp y) x)
       (let ((xa (a x))
 	    (xb (b x))
 	    (ya (a y))
@@ -137,7 +138,7 @@
 (defmethod %intersect% ((x interval) (y interval))
   "Returns the intersection of the intervals x and y,
    or +empty-interval+ if the intervals are not coincident."
-  (or (when (or (%emptyp% x) (%emptyp% y)) +empty-interval+)
+  (or (when (or (emptyp x) (emptyp y)) +empty-interval+)
       (let ((xa (a x))
 	    (xb (b x))
 	    (ya (a y))
@@ -162,20 +163,20 @@
    or +empty-interval+ if the intervals are not coincident."
   (if (null intervals)
       +full-interval+
-      (cond ((%emptyp% (car intervals)) +empty-interval+)
+      (cond ((emptyp (car intervals)) +empty-interval+)
 	    ((not (cdr intervals)) (car intervals))
 	    ((not (cddr intervals)) (%intersect% (car intervals) (cadr intervals)))
 	    (t (apply #'intersect (%intersect% (car intervals) (cadr intervals)) (cddr intervals))))))
 
 (defmethod span ((x interval))
   "Returns the length of the interval."
-  (if (%emptyp% x)
+  (if (emptyp x)
       0
       (- (b x) (a x))))
 
 (defmethod in-interval ((e real) (x interval))
   "Returns t if e is contained in the interval x, nil otherwise."
-  (and (not (%emptyp% x))
+  (and (not (emptyp x))
        (let ((lrel (if (ac x) (car %ltrels%) (cdr %ltrels%)))
 	     (rrel (if (bc x) (car %ltrels%) (cdr %ltrels%))))
 	 (and (funcall lrel (a x) e)

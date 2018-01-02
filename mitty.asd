@@ -22,4 +22,4 @@
 	       (:file "interpolation" :depends-on ("packages" "interval"))
 	       (:file "diffgeo" :depends-on ("packages" "interval" "rlambda" "interpolation"))
 	       (:file "base" :depends-on ("packages"))
-	       (:file "sdl2" :depends-on ("packages" "base"))))
+	       (:file "sdl" :depends-on ("packages" "base"))))

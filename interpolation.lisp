@@ -14,7 +14,8 @@
    (cons 'cspline          +cubic-spline-interpolation+)
    (cons 'periodic-cspline +periodic-cubic-spline-interpolation+)
    (cons 'akima            +akima-interpolation+)
-   (cons 'periodic-akima   +periodic-akima-interpolation+)))
+   (cons 'periodic-akima   +periodic-akima-interpolation+))
+  "GSLL interpolation types as symbols.")
 
 (defparameter *interpolation-classes*
   (list
@@ -23,7 +24,8 @@
    (cons 'cspline          2)
    (cons 'periodic-cspline 2)
    (cons 'akima            2)
-   (cons 'periodic-akima   2)))
+   (cons 'periodic-akima   2))
+  "The differentiability classes of interpolation types.")
 
 (defclass rinterpolation ()
   ((xa :initarg :xa
@@ -61,6 +63,7 @@
 	    (size r) (itype r))))
 
 (defun reinterpolate (rinterpolation)
+  "Recalculates interpolation for rinterpolation for changed knots or interpolants."
   (with-slots (xa ya interpolation itype) rinterpolation
     (setf interpolation (make-interpolation
 			 (cdr (assoc itype *interpolation-types*))
@@ -74,12 +77,14 @@
     (setf domain (interval (grid:aref xa 0) (grid:aref xa (1- size))))))
 
 (defun make-rinterpolation (itype xa ya)
+  "Makes an interpolation of type itype over knots xa and interpolants ya."
   (make-instance 'rinterpolation
 		 :xa xa
 		 :ya ya
 		 :itype itype))
 
 (defun make-uniform-knots (n &optional (a 0d0) (b 1d0))
+  "Makes a foreign grid with n elements in [a, b], with uniform steps."
   (make-grid-sequential-elements
    :dimensions n
    :grid-type 'foreign-array
@@ -90,14 +95,16 @@
 (defgeneric interpolate (object type &key)
   (:documentation "Interpolates object with interpolation type type."))
 
-(defmethod interpolate ((object rlambda) type &key (n 128) (over (domain object)))
-  (let* ((a (a over))
-	 (b (b over))
+(defmethod interpolate ((object rlambda) type &key (n 128) (interval (domain object)))
+  "Uniformly interpolates an rlambda with n knots in interval, using type interpolation."
+  (let* ((a (a interval))
+	 (b (b interval))
 	 (xa (make-uniform-knots n a b))
 	 (ya (map-grid :source xa :element-function object)))
     (make-rinterpolation type xa ya)))
 
 (defmethod interpolate ((object array) type &key)
+  "Uniformly interpolates the interpolant array object, using type interpolation."
   (let* ((ya (if (eq 'vector-double-float (type-of object))
 		 object
 		 (copy object :grid-type 'foreign-array)))
@@ -105,6 +112,7 @@
 	 (xa (make-uniform-knots size)))
     (make-rinterpolation type xa ya)))
 
+;;; Generics of GSLL functions.
 (defmethod evaluate ((object rinterpolation) point &key)
   (evaluate (interpolation object) point
 	    :xa (xa object) :ya (ya object)))

@@ -18,7 +18,6 @@
   (:shadowing-import-from #:lispbuilder-sdl-gfx
 			  #:*default-font*)
   (:shadowing-import-from #:gsll
-			  #:knots
 			  #:factorial
 			  #:mean
 			  #:variance
@@ -31,18 +30,17 @@
 			  #:distance
 			  #:rotate
 			  #:volume)
+  (:shadowing-import-from #:grid
+			  #:grid
+			  #:aref
+			  #:foreign-array
+			  #:make-grid
+			  #:map-grid
+			  #:make-grid-sequential-elements
+			  #:normalize)
   (:shadowing-import-from #:common-lisp
 			  #:/
 			  #:*
 			  #:-
-			  #:+))
-
-(setf antik::*antik-user-shadow-symbols*
-      '(maximizing maximize minimizing minimize multiplying antik:multiply summing
-	antik:sum for time length decf incf signum round floor coerce < <= > >= = max
-	min zerop minusp plusp abs exp log expt sqrt tanh cosh sinh atan acos asin tan
-	cos sin aref polar-to-rectangular rectangular-to-polar acceleration
-	psi knots row column sum multiply iterate))
-
-(antik:make-user-package :mitty)
-
+			  #:+)
+  (:shadow :knots))

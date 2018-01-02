@@ -1,5 +1,5 @@
 ;;;;
-;;;; The kitchen sink for particles, splines, screens, etc.
+;;;; The kitchen sink for curves, splines, screens, SDL stuff, etc.
 ;;;; Better organization sometime later.
 ;;;;
 ;;;; Alex Striff
@@ -18,51 +18,52 @@
 (defclass screen ()
   ((dims :initarg :dims
 	 :accessor dims
-	 :type 'vector-double-float)))
+	 :type 'vector-double-float
+	 :documentation "The dimensions of the screen."))
+  (:documentation "A screen that can be drawn upon."))
 
 (defclass sdl-screen ()
   ((width :initarg :width
 	  :accessor width
-	  :type 'double-float)
+	  :type 'double-float
+	  :documentation "The width of the screen.")
    (height :initarg :height
 	   :accessor height
-	   :type 'double-float)))
+	   :type 'double-float
+	   :documentation "The height of the screen."))
+  (:documentation "A SDL screen that is drawn upon with SDL methods."))
 
 (defgeneric screen-pos (p s &key)
-  (:documentation "Maps the particle coordinates of p to screen coordinates on s."))
-
-(defmethod screen-pos ((p particle) (s sdl-screen) &key)
-  (with-slots (pos) p
-    (with-slots (width height) s
-      (let ((px (aref pos 0))
-	    (py (aref pos 1)))
-	(declare (type double-float px py width height))
-	(list (lerp (/ (+ px 1d0) 2d0) 0d0 width)
-	      (lerp (- 1d0 (/ (+ py 1d0) 2d0)) 0d0 height))))))
+  (:documentation "Maps the native coordinates of p to screen coordinates on s."))
 
 (defmethod screen-pos ((p double-float) (s sdl-screen) &key)
+  "Lerps p in [0, 1] to screen size, preserving aspect ratio."
   (with-slots (width height) s
     (declare (type double-float width height))
     (let ((longdim (min width height)))
       (declare (type double-float longdim))
       (lerp (/ (+ p 1d0) 2d0) 0d0 longdim))))
 
-(defmethod screen-pos ((p double-float) (s sdl-screen) &key min max (shrink t))
+(defmethod screen-pos ((p double-float) (s sdl-screen) &key min max (margin t))
+  "Lerps p in [min, max] to screen size, preserving aspect ratio and default margin."
   (with-slots (width height) s
     (declare (type double-float width height min max))
     (let ((longdim (min width height))
 	  (factor (/ (sqrt 3d0))))
       (declare (type double-float longdim))
-      (+ (if shrink (* 0.5d0 (- 1d0 factor) longdim) 0d0)
-	 (* (if shrink factor 1d0)
+      (+ (if margin (* 0.5d0 (- 1d0 factor) longdim) 0d0)
+	 (* (if margin factor 1d0)
 	    (lerp (/ (- p min) (abs (- max min)))
 		  0d0
 		  longdim))))))
 
-(defparameter *cparam* 0d0)
+(defvar *cparam* 0d0
+  "Color parameter used for rainbow output on draws.")
 (declaim (type double-float *cparam*))
 
 (defun multi-lerp (v &rest interpolants)
+  "Piecewise lerps v between each of the interpolants. E.g. for interpolants
+   (10 -10 10), the graph on v would follow a period of a triangle wave."
   (declare (type double-float v))
   (let ((len (the fixnum (length interpolants))))
     (when (< len 2)
@@ -72,6 +73,7 @@
 	(lerp u (float (car c) 0d0) (float (cadr c) 0d0))))))
 
 (defun draw-out-circle (x y &optional (hr 0.5d0))
+  "Draws a SDL circle at (x, y) with radius hr, with coloring."
   (sdl:draw-aa-circle
    (sdl:point :x x :y y)
    (floor (* hr 2))
@@ -80,6 +82,7 @@
 		     :b (floor (multi-lerp *cparam* 0   255 0   0)))))
 
 (defun draw-out-line (x1 y1 x2 y2)
+  "Draws a SDL line at (x1, y1) to (x2, y2), with coloring."
   (sdl-gfx:draw-line-*
    (floor x1) (floor y1) (floor x2) (floor y2)
    :color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
@@ -87,9 +90,10 @@
 		     :b (floor (multi-lerp *cparam* 0   255 0   0)))))
 
 (defgeneric draw (p s &key)
-  (:documentation "Draws the particle p on the screen s."))
+  (:documentation "Draws the object p on the screen s."))
 
 (defmethod draw :before (p (s sdl-screen) &key (clear nil))
+  "Handles clearing the screen before a draw when needed."
   (when clear
     (sdl:draw-rectangle-* 0 0
 			  (floor (width s))
@@ -98,6 +102,8 @@
 			  :alpha 16)))
 
 (defmethod draw ((p plane-curve) (s sdl-screen) &key (n (size p)) (base nil) (normals nil))
+  "Draws the plane-curve p on s with n lines, optionally drawing knots if :base t,
+   and normals at the n line intersections if :normals t."
   (with-slots (width height) s
     (with-slots (x y domain) p
       (let* ((xs (make-array n :element-type 'double-float))

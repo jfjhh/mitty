@@ -10,8 +10,7 @@
 (deftype rfunc () '(or rinterpolation))
 
 (defclass curve ()
-  ((domain :initform (interval 0d0 1d0)
-	   :initarg :domain
+  ((domain :initarg :domain
 	   :accessor domain
 	   :type interval
 	   :documentation "The domain of the curve.")
@@ -26,7 +25,8 @@
    (knots :initarg :knots
 	  :accessor knots
 	  :type vector-double-float
-	  :documentation "The knots of the curve.")))
+	  :documentation "The knots of the curve."))
+  (:default-initargs :domain (interval 0d0 1d0)))
 
 (defmethod print-object ((c curve) stream)
   (print-unreadable-object (c stream :type t)
@@ -46,28 +46,36 @@
   (:documentation "Gets the signed curvature of curve at u."))
 
 (defgeneric curve-map (function curve &key)
-  (:documentation "Transforms the curve with function."))
+  (:documentation "Transforms the curve globally by local-mapping function on curve."))
 
 (defgeneric local-map (function curve param i &key)
-  (:documentation "Transforms the curve at param with (function param curve)."))
+  (:documentation "Transforms the curve point at param to be the result of
+calling function with the curve, the value of the parameter along the curve,
+and the index of the point."))
+
+(defgeneric displace (curve function)
+  (:documentation "Displaces the curve at its points by the vector returned by
+function evaluated as per local-map."))
 
 (defmethod curve-map (function (curve curve) &rest args &key)
+  ;; General to all curves with underlying knot parameters.
   (with-slots (size knots) curve
     (dotimes (i size)
-      (let ((param (grid:aref knots i)))
+      (let ((param (aref knots i)))
 	(apply #'local-map function curve param i args)))))
 
 (defclass plane-curve (curve)
   ((x :initarg :x
       :accessor x
       :type rfunc
-      :documentation "The abscissa of the plane curve.")
+      :documentation "The abscissae of the plane curve.")
    (y :initarg :y
       :accessor y
       :type rfunc
-      :documentation "The ordinate of the plane curve.")))
+      :documentation "The ordinates of the plane curve.")))
 
 (defun make-plane-curve (x y &optional knots)
+  "Makes a plane curve with abscissae x and ordinates y, with default uniform knots."
   (let ((xs (size x))
 	(ys (size y))
 	(domain (intersect (domain x) (domain y))))
@@ -108,26 +116,31 @@
 (defmethod local-map (function (curve plane-curve) param i &key (impure nil))
   (let ((point (funcall function curve param i)))
     (when impure
-      (setf (grid:aref (ya (x curve)) i) (grid:aref point 0))
-      (setf (grid:aref (ya (y curve)) i) (grid:aref point 1)))))
+      (setf (aref (ya (x curve)) i) (aref point 0))
+      (setf (aref (ya (y curve)) i) (aref point 1)))))
 
-(defun displace (curve function)
+(defmethod displace (curve function)
   (flet ((disp (c u i)
 	   (with-slots (x y) c
-	     (let ((current (grid (grid:aref (ya x) i)
-				  (grid:aref (ya y) i))))
+	     (let ((current (grid (aref (ya x) i)
+				  (aref (ya y) i))))
 	       (antik:+ current (funcall function c u i))))))
     (curve-map #'disp curve :impure t)))
 
-(defun minimize-curvature (curve u i)
+(defun minimize-curvature (curve u i &optional (step-size 0.0025))
+  "An attempt at a displace function that will minimize curvature of curve upon
+   iteration. Currently requires sufficiently small step-size to be stable.
+   TODO: Implement springiness so that points that are moved closer together will
+         also be pushed apart."
   (declare (ignore i))
   (let* ((n (normalize (normal curve u)))
 	 (k (curvature curve u))
 	 (sgn (if (plusp k) 1 -1))
-	 (s (* sgn (clamp (* (abs k) 0.005d0) 0d0 0.1d0))))
+	 (s (* sgn (clamp (* (abs k) step-size) 0d0 0.1d0))))
     (antik:* n s)))
 
 (defun jiggle (amount)
+  "A displace function that generates vectors in the closed disk of radius amount."
   (let ((amount (clamp amount 0d0 0.5d0)))
     (flet ((disp () (- (random 1.0d0) 0.5d0)))
       (lambda (&rest args)
@@ -136,11 +149,12 @@
 		 amount)))))
 
 (defun draw-deform (curve function &optional (n 1))
+  "Performs n displacements of curve by function, while drawing curve each iteration."
   (dotimes (i n)
     (sdl:draw-rectangle-* 0 0
 			  (floor (width *screen*))
 			  (floor (height *screen*))
 			  :color (sdl:color)
 			  :alpha 32)
-    (displace curve function)
-    (draw curve *screen* :n (* 3 (size curve)) :clear nil :base t :normals t)))
+    (displace curve function))
+  (draw curve *screen* :n (* 3 (size curve)) :clear nil :base t :normals t))

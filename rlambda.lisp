@@ -23,16 +23,14 @@
 	 :accessor args
 	 :type list
 	 :documentation "The bound variables of the symbolic function.")
-   (func :initform nil
-	 :initarg :func
+   (func :initarg :func
 	 :accessor func
 	 :type function
 	 :documentation "The funcallable real function.")
    (cfuncs :accessor cfuncs
 	   :type list
 	   :documentation "A list of AD functions of increasing differentiability class.")
-   (c :initform *default-class*
-      :initarg :c
+   (c :initarg :c
       :accessor c
       :type (or integer symbol)
       :documentation "The differentiability class of the function.")
@@ -40,6 +38,7 @@
 	   :accessor domain
 	   :type interval
 	   :documentation "The domain of the function."))
+  (:default-initargs :func nil :c *default-class*)
   (:metaclass c2mop:funcallable-standard-class))
 
 (defun %funcall-rlambda-sexp% (sexp)
@@ -53,6 +52,7 @@
       sexp))
 
 (defun compile-rlambda (r)
+  "(Re)compiles the callable functions of r to reflect the sexp inside."
   (with-slots (sfunc args func cfuncs c) r
     (setf cfuncs
 	  (mapcar (lambda (s) (eval `(%adlambda% ,s ,(car args) ,@sfunc)))
@@ -79,20 +79,15 @@
 	    (%class-string% (c r)) (interval-string (domain r)) (args r) (sfunc r))))
 
 (defmacro rlambda (args &body body)
+  "Makes a rlambda, with similar syntax to normal lambdas."
   `(make-instance 'rlambda :args ',args :sfunc ',body :domain +full-interval+))
 
 (defun %rlambda% (args &rest body)
+  "Makes a rlambda, with similar syntax to normal lambdas, evaluating arguments."
   (make-instance 'rlambda :args args :sfunc body :domain +full-interval+))
 
 (defmacro defrfun (name lambda-list &body body)
-  `(progn
-     (when (fboundp ',name)
-       (warn "Redefining real function ~s." ',name))
-     (setf (fdefinition ',name)
-	   (rlambda ,lambda-list ,@body))
-     ',name))
-
-(defmacro defrfun* (name lambda-list &body body)
+  "Defines a function, with similar syntax to defun, that is a rlambda."
   `(progn
      (when (fboundp ',name)
        (warn "Redefining real function ~s." ',name))
@@ -109,9 +104,13 @@
 	     `(lambda (function &rest arguments)
 		(apply (nth ,(1- n) (cfuncs function)) arguments)))))
 
+;;; Defines functions to do multiple-value returning calls of rlambdas of varying
+;;; differentiability class. Example: to get the value and first and second derivatives
+;;; of a C^2 rlambda as multiple values, one would use (c2call r 0.2d0).
 (dotimes (n *default-class*) (%defcncall% (1+ n)))
 
 (defun cncall (function &rest arguments)
+  "Calls the highest differentiability class function of function (values)."
   (apply (%cnfunc% function (c function)) arguments))
 
 (defun %defdncall% (n)
@@ -120,9 +119,13 @@
 	     `(lambda (function &rest arguments)
 		(nth-value ,n (apply (nth ,(1- n) (cfuncs function)) arguments))))))
 
+;;; Defines functions to do single-value returning calls of rlambdas of varying
+;;; differentiability class. Example: to get the 2nd derivative of a C^2 rlambda,
+;;; one would use (d2call r 0.2d0).
 (dotimes (n *default-class*) (%defdncall% (1+ n)))
 
 (defun dncall (function &rest arguments)
+  "Calls the highest differentiability class function of function (last value)."
   (car (last (multiple-value-list
 	      (apply (%cnfunc% function (c function)) arguments)))))
 
@@ -139,6 +142,8 @@
 	(t (nreverse acc))))
 
 (defun rcompose (f g &optional (pos 0))
+  "Composes rlambdae f and g into f.g, with the substitution at argument pos.
+   Alpha-converts arguments as necessary."
   (with-slots ((fargs args)) f
     (with-slots ((gargs args)) g
       (let* ((sub (nth pos fargs))
@@ -156,25 +161,10 @@
 				 (cons 'progn gfunc))))
 		  (sfunc f))))))))
 
-(defun %single-arg% (f)
-  (with-slots (args sfunc) f
-    (let ((arg (gensym +ralpha+)))
-      (apply #'%rlambda% (list arg)
-	     (sublis (mapcar (lambda (x) (cons x arg)) args) sfunc)))))
-
-(defun %ngensyms% (n)
-  (make-gensym-list n +ralpha+))
-
-(defun rcombine (func &rest rs)
-  (let* ((args (%ngensyms% (length rs)))
-	 (base (%rlambda% args `(funcall ,func ,@args)))
-	 (arg 0))
-    (reduce (lambda (f g) (prog1 (rcompose f g arg) (incf arg)))
-	    rs :initial-value base)))
-
 (defun rlerp (a b)
+  "Returns a rlambda that lerps between a and b."
   (let ((r (%rlambda% '(v) `(+ (* (- 1 v) ,a) (* v ,b)))))
-    (setf (domain r) (interval 0 1))
+    (setf (domain r) (interval 0d0 1d0))
     r))
 
 ;;; Generics of GSLL functions.
