@@ -20,6 +20,7 @@
 	       (:file "interval" :depends-on ("packages"))
 	       (:file "rlambda" :depends-on ("packages" "interval"))
 	       (:file "interpolation" :depends-on ("packages" "interval"))
+	       (:file "physics" :depends-on ("packages"))
 	       (:file "diffgeo" :depends-on ("packages" "interval" "rlambda" "interpolation"))
-	       (:file "base" :depends-on ("packages"))
+	       (:file "base" :depends-on ("packages" "diffgeo" "physics"))
 	       (:file "sdl" :depends-on ("packages" "base"))))

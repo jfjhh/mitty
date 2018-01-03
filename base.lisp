@@ -72,14 +72,17 @@
       (let ((c (nthcdr k interpolants)))
 	(lerp u (float (car c) 0d0) (float (cadr c) 0d0))))))
 
-(defun draw-out-circle (x y &optional (hr 0.5d0))
+(defun draw-out-circle (x y &optional (hr 0.5d0) (filled nil))
   "Draws a SDL circle at (x, y) with radius hr, with coloring."
-  (sdl:draw-aa-circle
-   (sdl:point :x x :y y)
-   (floor (* hr 2))
-   :color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
-		     :g (floor (multi-lerp *cparam* 0   0   255 0))
-		     :b (floor (multi-lerp *cparam* 0   255 0   0)))))
+  (let ((px (round x))
+	(py (round y))
+	(r (floor (* hr 2)))
+	(color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
+			  :g (floor (multi-lerp *cparam* 0   0   255 0))
+			  :b (floor (multi-lerp *cparam* 0   255 0   0)))))
+    (if filled
+	(sdl:draw-filled-circle-* px py r :color color)
+	(sdl:draw-aa-circle-* px py r :color color))))
 
 (defun draw-out-line (x1 y1 x2 y2)
   "Draws a SDL line at (x1, y1) to (x2, y2), with coloring."
@@ -157,3 +160,40 @@
 				      (- height
 					 (screen-pos (grid:aref yod i) s :min pmin :max pmax))
 				      1))))))))))
+
+(defun draw-2d-particle (p s)
+  "Draws a 2D particle to sdl-screen s."
+  (with-slots (pos) p
+    (with-slots (width height) s
+      (let* ((px (aref pos 0))
+	     (py (aref pos 1))
+	     (x (+ px (/ width 2)))
+	     (y (+ (- py) (/ height 2))))
+	(draw-out-circle x y 1 t)))))
+
+(defun draw-3d-particle (p s)
+  "Draws a 3D particle to sdl-screen s with derpy weak-perspective projection."
+  ;; TODO: Not necessarily here, but eventually implement actual 3D
+  ;;       perspective projection.
+  (with-slots (pos) p
+    (with-slots (width height) s
+      (let* ((px (aref pos 0))
+	     (py (aref pos 1))
+	     (pz (aref pos 2))
+	     (z (+ pz 1d0))
+	     (x (+ (/ px z) (/ width 2)))
+	     (y (+ (- (/ py z)) (/ height 2))))
+	(draw-out-circle x y 1 t)))))
+
+(defmethod draw ((p particle) (s sdl-screen) &key)
+  "Draws the particle p to sdl-screen s as a circle."
+  (with-slots (pos) p
+    (let ((dim (length pos)))
+      (case dim
+	(2 (draw-2d-particle p s))
+	(3 (draw-3d-particle p s))
+	(t (error "Cannot draw particle of dimensionality ~d to sdl-screen." dim))))))
+
+(defmethod draw :after ((p generator-bullet) (s sdl-screen) &key)
+  (loop :for c :being :the :elements :of (children p) :do
+     (draw c s)))
