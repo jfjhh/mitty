@@ -12,6 +12,12 @@
 (deftype mass   () '(double-float 0d0 *)) ; Non-negative.
 (deftype charge () 'double-float)
 
+(defconstant +earth-g+ 9.81d0)
+(defconstant +gravitational-constant+ 6.674d-11)
+(defconstant +elementary-charge+ 1.602176620898d-19)
+(defconstant +vacuum-permittivity+ 8.854187817d-12)
+(defconstant +couloumb-number+ (/ (* 4d0 pi +vacuum-permittivity+)))
+
 (defclass physical-object ()
   ((mass :initarg :mass
 	 :accessor mass
@@ -21,7 +27,7 @@
 	   :accessor charge
 	   :type charge
 	   :documentation "The charge of the particle in Couloumbs."))
-  (:default-initargs :mass 0d0 :charge 0d0)
+  (:default-initargs :mass 1d0 :charge +elementary-charge+)
   (:documentation "A particle with mass and charge."))
 
 (defclass kinematic-object ()
@@ -104,6 +110,7 @@
   (:documentation "A particle that can experience kinematic motion from forces."))
 
 (defun make-physical-particle (n)
+  "Makes a physical particle of dimensionality n."
   (let ((zero (make-grid `((array ,n) double-float))))
     (make-instance 'physical-particle
 		   :pos zero
@@ -135,11 +142,99 @@
   (with-slots (pos vel acc) particle
     ;; TODO: Figure out and apply external forces to particle acceleration.
     (antik:incf pos (antik:* vel dt))
-    (antik:incf vel (antik:* acc dt)))) 
+    (antik:incf vel (antik:* acc dt))
+
+    ;; Wrap around view box.
+    #||
+    (setf pos
+	  (antik:* pos
+		   (map-grid :source pos :element-function
+			     (lambda (x) (if (< 320d0 (abs x)) -1d0 1d0)))))
+    ||#
+    )) 
 
 (defun add-bullet-child (update-func)
+  "Makes a bullet update function that adds the result of update-func to (children bullet)."
   (lambda (bullet dt)
     (with-slots (children) bullet
       (when (queue-full-p children)
 	(dequeue children))
       (enqueue (funcall update-func bullet dt) children))))
+
+(defgeneric kinetic-energy (physical-object)
+  (:documentation "Calculate the kinetic energy associated with physical-object."))
+
+(defmethod kinetic-energy ((particle physical-particle))
+  (with-slots (mass vel) particle
+    (let ((speed (norm vel)))
+      (* 0.5d0 mass (* speed speed)))))
+
+(defgeneric gravitational-force (pobject1 pobject2)
+  (:documentation "Calculates the gravitational force of pobject 1 on pobject 2"))
+
+(defgeneric couloumb-force (pobject1 pobject2)
+  (:documentation "Calculates the electrical force of pobject 1 on pobject 2"))
+
+(defgeneric net-force (pobject1 pobject2)
+  (:documentation "Calculates the net force of pobject 1 on pobject 2"))
+
+(defmethod gravitational-force ((pobject1 physical-particle) (pobject2 physical-particle))
+  (let* ((r (antik:- (pos pobject1) (pos pobject2))))
+    (multiple-value-bind (r^ |r|) (normalize r)
+      (antik:* r^ (/ (* +gravitational-constant+ (mass pobject1) (mass pobject2)) (* |r| |r|))))))
+
+(defmethod couloumb-force ((pobject1 physical-particle) (pobject2 physical-particle))
+  (let* ((r (antik:- (pos pobject1) (pos pobject2))))
+    (multiple-value-bind (r^ |r|) (normalize r)
+      (antik:* r^ (/ (* +couloumb-number+ (charge pobject1) (charge pobject2)) (* |r| |r|))))))
+
+(defmethod net-force ((pobject1 physical-particle) (pobject2 physical-particle))
+  (antik:+ (gravitational-force pobject1 pobject2)
+	   (couloumb-force pobject1 pobject2)))
+
+(defun all-pairs (list)
+  (mapcon (lambda (x) (mapcar (curry #'cons (car x)) (cdr x))) list))
+
+(defun map-pairs* (function list)
+  (mapcar (lambda (x) (cons x (funcall function (car x) (cdr x)))) (all-pairs list)))
+
+(defun map-pairs (function list)
+  (mapcar #'cdr (map-pairs* function list)))
+
+(defun apply-force (p1 p2 force-1->2)
+  (antik:incf (acc p2) (antik:/ force-1->2 (mass p2)))
+  (antik:incf (acc p1) (antik:/ (antik:- force-1->2) (mass p1))))
+
+(defun apply-interaction-forces (psequence)
+  "Calculates interaction forces between physical-particles."
+  (flet ((pair-force (i j)
+	   (let ((p1 (aref psequence i))
+		 (p2 (aref psequence j)))
+	     (net-force p1 p2)))
+	 (apply-force-pair (x)
+	   (destructuring-bind ((i . j) . force) x
+	     (let ((p1 (aref psequence i))
+		   (p2 (aref psequence j)))
+	       (apply-force p1 p2 force)))))
+    (let ((n (length psequence)))
+      (dotimes (i n)
+	(let ((p (aref psequence i)))
+	  (setf (acc p) (antik:* (acc p) 0d0))))
+      (mapc #'apply-force-pair
+	    (map-pairs* #'pair-force (iota (length psequence)))))))
+
+(defun random-pos-physical-particle (d)
+  (let ((p (make-physical-particle 3)))
+    (setf (pos p)
+	  (apply #'grid
+		 (mapcar (lambda (x)
+			   (declare (ignore x))
+			   (- 320 (random 640)))
+			 (iota d))))
+    p))
+
+(defun random-pos-physical-particles (n d)
+  (let ((particles (make-array n)))
+    (dotimes (i n)
+      (setf (svref particles i) (random-pos-physical-particle d)))
+    particles))

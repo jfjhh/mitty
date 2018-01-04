@@ -38,6 +38,7 @@
 			  #:make-grid
 			  #:map-grid
 			  #:make-grid-sequential-elements
+			  #:norm
 			  #:normalize)
   (:shadowing-import-from #:common-lisp
 			  #:/

@@ -70,25 +70,27 @@
       (let ((c (nthcdr k interpolants)))
 	(lerp u (float (car c) 0d0) (float (cadr c) 0d0))))))
 
-(defun draw-out-circle (x y &optional (hr 0.5d0) (filled nil))
+(defun draw-out-circle (x y &optional (hr 0.5d0) (filled nil) (color nil))
   "Draws a SDL circle at (x, y) with radius hr, with coloring."
   (let ((px (round x))
 	(py (round y))
-	(r (floor (* hr 2)))
-	(color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
-			  :g (floor (multi-lerp *cparam* 0   0   255 0))
-			  :b (floor (multi-lerp *cparam* 0   255 0   0)))))
+	(r (round (* hr 2)))
+	(color (or color
+		   (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
+			      :g (floor (multi-lerp *cparam* 0   0   255 0))
+			      :b (floor (multi-lerp *cparam* 0   255 0   0))))))
     (if filled
 	(sdl:draw-filled-circle-* px py r :color color)
 	(sdl:draw-aa-circle-* px py r :color color))))
 
-(defun draw-out-line (x1 y1 x2 y2)
+(defun draw-out-line (x1 y1 x2 y2 &optional (color nil))
   "Draws a SDL line at (x1, y1) to (x2, y2), with coloring."
   (sdl-gfx:draw-line-*
-   (floor x1) (floor y1) (floor x2) (floor y2)
-   :color (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
-		     :g (floor (multi-lerp *cparam* 0   0   255 0))
-		     :b (floor (multi-lerp *cparam* 0   255 0   0)))))
+   (round x1) (round y1) (round x2) (round y2)
+   :color (or color
+	      (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
+			 :g (floor (multi-lerp *cparam* 0   0   255 0))
+			 :b (floor (multi-lerp *cparam* 0   255 0   0))))))
 
 (defgeneric draw (p s &key)
   (:documentation "Draws the object p on the screen s."))
@@ -178,10 +180,15 @@
       (let* ((px (aref pos 0))
 	     (py (aref pos 1))
 	     (pz (aref pos 2))
-	     (z (+ pz 1d0))
-	     (x (+ (/ px z) (/ width 2)))
-	     (y (+ (- (/ py z)) (/ height 2))))
-	(draw-out-circle x y 1 t)))))
+	     (k (sqrt 3))
+	     (s (/ (min width height) 2d0))
+	     (zscale (+ (* (/ (- k 1) (* -2 s)) (- pz s)) 1d0))
+	     (x (+ (/ px zscale) (/ width 2)))
+	     (y (+ (- (/ py zscale)) (/ height 2)))
+	     (size-scale (/ zscale))
+	     (color (round (* 255 size-scale)))
+	     (hr (* 2d0 size-scale)))
+	(draw-out-circle x y hr t (sdl:color :r color :g (round color 3) :b color))))))
 
 (defmethod draw ((p particle) (s sdl-screen) &key)
   "Draws the particle p to sdl-screen s as a circle."
