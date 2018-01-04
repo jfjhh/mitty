@@ -7,8 +7,6 @@
 
 (in-package #:mitty)
 
-(declaim (optimize (speed 1) (safety 1) (debug 3) (compilation-speed 0)))
-
 (defconstant tau (* 2d0 pi))
 (declaim (type double-float tau))
 
@@ -195,5 +193,6 @@
 	(t (error "Cannot draw particle of dimensionality ~d to sdl-screen." dim))))))
 
 (defmethod draw :after ((p generator-bullet) (s sdl-screen) &key)
-  (loop :for c :being :the :elements :of (children p) :do
-     (draw c s)))
+  (with-slots (children) p
+    (loop :for i :from 2 :to (queue-count children) :do
+       (draw (svref children i) s))))

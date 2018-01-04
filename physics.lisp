@@ -5,9 +5,8 @@
 
 (in-package #:mitty)
 
-(declaim (optimize (speed 1) (safety 1) (debug 3) (compilation-speed 0)))
-
 (deftype rvector (n) `(simple-array double-float (,n)))
+(deftype queue () 'simple-vector)
 
 (deftype scalar () 'double-float)
 (deftype mass   () '(double-float 0d0 *)) ; Non-negative.
@@ -86,11 +85,12 @@
 (defclass generator-bullet (kinematic-bullet)
   ((children :initarg :children
 	     :accessor children
-	     :type (vector bullet)
+	     :type queue
 	     :documentation "The composite children of the bullet."))
-  (:default-initargs
-   :children (make-array 0 :fill-pointer 0 :adjustable t :element-type 'bullet))
   (:documentation "A kinematic bullet that can generate child bullets of its own."))
+
+(defmethod initialize-instance :after ((bullet generator-bullet) &key (max-children 16))
+  (setf (slot-value bullet 'children) (make-queue max-children)))
 
 (defclass physical-particle (physical-object particle)
   ((vel :initarg :vel
@@ -127,8 +127,9 @@
     (incf (aref pos 1) (* vel dt (sin ang-pos)))))
 
 (defmethod update :after ((bullet generator-bullet) dt &key)
-  (loop :for c :being :the :elements :of (children bullet) :do
-     (update c dt)))
+  (with-slots (children) bullet
+    (loop :for i :from 2 :to (queue-count children) :do
+       (update (svref children i) dt))))
 
 (defmethod update ((particle physical-particle) dt &key)
   (with-slots (pos vel acc) particle
@@ -136,19 +137,9 @@
     (antik:incf pos (antik:* vel dt))
     (antik:incf vel (antik:* acc dt)))) 
 
-(defun remove-far-bullets (bullet dt)
-  (declare (ignore dt))
-  (with-slots (pos children) bullet
-    (let ((gx (aref pos 0))
-	  (gy (aref pos 1)))
-      (flet ((farp (b)
-	       (with-slots (pos) b
-		 (let* ((bx (aref pos 0))
-			(by (aref pos 1))
-			(x (- gx bx))
-			(y (- gy by))
-			(r (sqrt (+ (* x x) (* y y)))))
-		   (> r 100)))))
-	(with-slots (children) bullet
-	  ;; TODO: Actually update children and maintain resizability somehow.
-	  (remove-if-not #'farp children))))))
+(defun add-bullet-child (update-func)
+  (lambda (bullet dt)
+    (with-slots (children) bullet
+      (when (queue-full-p children)
+	(dequeue children))
+      (enqueue (funcall update-func bullet dt) children))))

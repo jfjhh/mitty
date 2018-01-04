@@ -5,8 +5,6 @@
 
 (in-package #:mitty)
 
-(declaim (optimize (speed 1) (safety 1) (debug 3) (compilation-speed 0)))
-
 (defparameter *interpolation-types*
   (list
    (cons 'linear           +linear-interpolation+)

@@ -14,13 +14,14 @@
 	       #:alexandria
 	       #:lispbuilder-sdl
 	       #:lispbuilder-sdl-gfx
-	       #:bordeaux-threads)
+	       #:bordeaux-threads
+	       #:cl-speedy-queue)
   :components ((:file "packages")
 	       (:file "ad" :depends-on ("packages"))
 	       (:file "interval" :depends-on ("packages"))
 	       (:file "rlambda" :depends-on ("packages" "interval"))
 	       (:file "interpolation" :depends-on ("packages" "interval"))
-	       (:file "physics" :depends-on ("packages"))
 	       (:file "diffgeo" :depends-on ("packages" "interval" "rlambda" "interpolation"))
+	       (:file "physics" :depends-on ("packages"))
 	       (:file "base" :depends-on ("packages" "diffgeo" "physics"))
 	       (:file "sdl" :depends-on ("packages" "base"))))

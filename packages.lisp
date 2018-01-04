@@ -10,7 +10,8 @@
 	#:alexandria
 	#:lispbuilder-sdl
 	#:lispbuilder-sdl-gfx
-	#:bordeaux-threads)
+	#:bordeaux-threads
+	#:cl-speedy-queue)
   (:shadowing-import-from #:closer-mop
 			  #:standard-generic-function
 			  #:defmethod
