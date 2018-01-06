@@ -34,26 +34,28 @@
 (defgeneric screen-pos (p s &key)
   (:documentation "Maps the native coordinates of p to screen coordinates on s."))
 
-(defmethod screen-pos ((p double-float) (s sdl-screen) &key)
+(defun screen-pos* (p s &optional (abscissa t) (scale 1d0))
   "Lerps p in [0, 1] to screen size, preserving aspect ratio."
   (with-slots (width height) s
     (declare (type double-float width height))
-    (let ((longdim (min width height)))
-      (declare (type double-float longdim))
-      (lerp (/ (+ p 1d0) 2d0) 0d0 longdim))))
+    (if abscissa
+	(+ (* scale p) (/ width 2))
+	(- (/ height 2) (* scale p)))))
 
 (defmethod screen-pos ((p double-float) (s sdl-screen) &key min max (margin t))
   "Lerps p in [min, max] to screen size, preserving aspect ratio and default margin."
-  (with-slots (width height) s
-    (declare (type double-float width height min max))
-    (let ((longdim (min width height))
-	  (factor (/ (sqrt 3d0))))
-      (declare (type double-float longdim))
-      (+ (if margin (* 0.5d0 (- 1d0 factor) longdim) 0d0)
-	 (* (if margin factor 1d0)
-	    (lerp (/ (- p min) (abs (- max min)))
-		  0d0
-		  longdim))))))
+  (if (not (and min max))
+      (screen-pos* p s)
+      (with-slots (width height) s
+	(declare (type double-float width height min max))
+	(let ((longdim (min width height))
+	      (factor (/ (sqrt 3d0))))
+	  (declare (type double-float longdim))
+	  (+ (if margin (* 0.5d0 (- 1d0 factor) longdim) 0d0)
+	     (* (if margin factor 1d0)
+		(lerp (/ (- p min) (abs (- max min)))
+		      0d0
+		      longdim)))))))
 
 (defvar *cparam* 0d0
   "Color parameter used for rainbow output on draws.")
@@ -70,6 +72,11 @@
       (let ((c (nthcdr k interpolants)))
 	(lerp u (float (car c) 0d0) (float (cadr c) 0d0))))))
 
+(defun rainbow-color (v)
+  (sdl:color :r (round (multi-lerp v 255 255 0   0   0   255 255))
+	     :g (round (multi-lerp v 0   255 255 255 0   0   0))
+	     :b (round (multi-lerp v 0   0   0   255 255 255 0))))
+
 (defun draw-out-circle (x y &optional (hr 0.5d0) (filled nil) (color nil))
   "Draws a SDL circle at (x, y) with radius hr, with coloring."
   (let ((px (round x))
@@ -85,12 +92,13 @@
 
 (defun draw-out-line (x1 y1 x2 y2 &optional (color nil))
   "Draws a SDL line at (x1, y1) to (x2, y2), with coloring."
+  (setf *cparam* (mod (+ *cparam* 1.5d-6) 1d0))
   (sdl-gfx:draw-line-*
    (round x1) (round y1) (round x2) (round y2)
    :color (or color
-	      (sdl:color :r (floor (multi-lerp *cparam* 255 0   0   255))
-			 :g (floor (multi-lerp *cparam* 0   0   255 0))
-			 :b (floor (multi-lerp *cparam* 0   255 0   0))))))
+	      (sdl:color :r (round (multi-lerp *cparam* 255 255 0   0   0   255 255))
+			 :g (round (multi-lerp *cparam* 0   255 255 255 0   0   0))
+			 :b (round (multi-lerp *cparam* 0   0   0   255 255 255 0))))))
 
 (defgeneric draw (p s &key)
   (:documentation "Draws the object p on the screen s."))
@@ -111,7 +119,8 @@
     (with-slots (x y domain) p
       (let* ((xs (make-array n :element-type 'double-float))
 	     (ys (make-array n :element-type 'double-float))
-	     (ns (make-array n :element-type '(simple-vector 2))))
+	     (ns (make-array n :element-type '(simple-vector 2)))
+	     (nok n))
 	(loop :for i :from 0 :below n :do
 	   (let* ((u (/ i (- n 1d0)))
 		  (a (a domain))
@@ -120,7 +129,8 @@
 	     (setf (aref xs i) (the double-float (evaluate x param))
 		   (aref ys i) (the double-float (evaluate y param))
 		   (aref ns i) (normalize (normal p param)))))
-	(let* ((xmin (the double-float (loop :for i :from 0 :below n
+	(let* ((n nok)
+	       (xmin (the double-float (loop :for i :from 0 :below n
 					  :minimizing (aref xs i))))
 	       (xmax (the double-float (loop :for i :from 0 :below n
 					  :maximizing (aref xs i))))
@@ -133,12 +143,12 @@
 	       (xnew nil)
 	       (ynew nil)
 	       (xold (screen-pos (aref xs 0) s :min pmin :max pmax))
-	       (yold (screen-pos (aref ys 0) s :min pmin :max pmax)))
+	       (yold (- height (screen-pos (aref ys 0) s :min pmin :max pmax))))
 	  (loop :for i :from 1 :below n :do
 	     (let* ((normal (aref ns i))
 		    (xnorm (elt normal 0))
 		    (ynorm (elt normal 1))
-		    (nlen (* 256 (curvature p (/ i (- n 1d0))))))
+		    (nlen 12d0))
 	       (setf xnew (screen-pos (aref xs i) s :min pmin :max pmax)
 		     ynew (- height (screen-pos (aref ys i) s :min pmin :max pmax)))
 	       (draw-out-line xold yold xnew ynew)
@@ -161,43 +171,35 @@
 					 (screen-pos (grid:aref yod i) s :min pmin :max pmax))
 				      1))))))))))
 
-(defun draw-2d-particle (p s)
-  "Draws a 2D particle to sdl-screen s."
-  (with-slots (pos) p
-    (with-slots (width height) s
-      (let* ((px (aref pos 0))
-	     (py (aref pos 1))
-	     (x (+ px (/ width 2)))
-	     (y (+ (- py) (/ height 2))))
-	(draw-out-circle x y 1 t)))))
+(defun project-point (point screen)
+  "Gets position of point p on s."
+  (with-slots (width height) screen
+    (case (length point)
+      (2 ; Scaling to screen size.
+       (let* ((px (aref point 0))
+	      (py (aref point 1))
+	      (x (+ px (/ width 2)))
+	      (y (+ (- py) (/ height 2))))
+	 (values (grid x y)
+		 1d0)))
+      (3 ; Weak perspective and scaling to screen size.
+       (let* ((px (aref point 0))
+	      (py (aref point 1))
+	      (pz (aref point 2))
+	      (k (sqrt 3))
+	      (s (/ (min width height) 2d0))
+	      (zscale (/ (+ (* (/ (- k 1) (* -2 s)) (- pz s)) 1d0)))
+	      (x (+ (* px zscale) (/ width 2)))
+	      (y (+ (- (* py zscale)) (/ height 2))))
+	 (values (grid x y)
+		 zscale)))
+      (t (error "Cannot project point of dimensionality ~d."
+		(length point))))))
 
-(defun draw-3d-particle (p s)
-  "Draws a 3D particle to sdl-screen s with derpy weak-perspective projection."
-  ;; TODO: Not necessarily here, but eventually implement actual 3D
-  ;;       perspective projection.
-  (with-slots (pos) p
-    (with-slots (width height) s
-      (let* ((px (aref pos 0))
-	     (py (aref pos 1))
-	     (pz (aref pos 2))
-	     (k (sqrt 3))
-	     (s (/ (min width height) 2d0))
-	     (zscale (+ (* (/ (- k 1) (* -2 s)) (- pz s)) 1d0))
-	     (x (+ (/ px zscale) (/ width 2)))
-	     (y (+ (- (/ py zscale)) (/ height 2)))
-	     (size-scale (/ zscale))
-	     (color (round (* 255 size-scale)))
-	     (hr (* 2d0 size-scale)))
-	(draw-out-circle x y hr t (sdl:color :r color :g (round color 3) :b color))))))
-
-(defmethod draw ((p particle) (s sdl-screen) &key)
-  "Draws the particle p to sdl-screen s as a circle."
-  (with-slots (pos) p
-    (let ((dim (length pos)))
-      (case dim
-	(2 (draw-2d-particle p s))
-	(3 (draw-3d-particle p s))
-	(t (error "Cannot draw particle of dimensionality ~d to sdl-screen." dim))))))
+(defmethod draw ((p particle) (s sdl-screen) &key (size 2d0))
+  "Draws the particle p to sdl-screen s as a filled circle."
+  (multiple-value-bind (position zscale) (project-point (pos p) s)
+    (draw-out-circle (aref position 0) (aref position 1) (* size zscale) t)))
 
 (defmethod draw :after ((p generator-bullet) (s sdl-screen) &key)
   (with-slots (children) p

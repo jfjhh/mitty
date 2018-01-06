@@ -7,12 +7,14 @@ if it is easier to describe curves. It would be easier to describe curves if I
 had a language and computer program to draw some curves. Also splines are
 interesting. I have no idea where this project is going.
 
-Fancy screenshots to come. For now, a golden ratio flower, a butterfly with
-normals and an angular random walk.
+Fancy screenshots to come. For now, electric fields, a golden ratio flower, a
+butterfly with normals and an angular random walk.
 
-![Golden Ratio Flower](fib-flower.png)(Flower)
+![Electric Fields](images/electric.png)
 
-![Butterfly with Normals](butterfly.png)(Butterfly)
+![Golden Ratio Flower](images/fib-flower.png)
 
-![Angular Random Walk](swirls.png)(Swirls)
+![Butterfly with Normals](images/butterfly.png)
+
+![Angular Random Walk](images/swirls.png)
 

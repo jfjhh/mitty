@@ -66,7 +66,7 @@
 	       ;; Deform the curve.
 	       (when *deform*
 		 (clear)
-		 (setf *cparam* (mod (+ *cparam* 0.0025d0) 1d0))
+		 (setf *cparam* (mod (+ *cparam* 1d-4) 1d0))
 		 (draw-deform *deform-curve* #'minimize-curvature 8))
 
 	       (sdl:update-display))))))

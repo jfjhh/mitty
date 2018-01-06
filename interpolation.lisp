@@ -103,12 +103,23 @@
 
 (defmethod interpolate ((object array) type &key)
   "Uniformly interpolates the interpolant array object, using type interpolation."
-  (let* ((ya (if (eq 'vector-double-float (type-of object))
-		 object
-		 (copy object :grid-type 'foreign-array)))
-	 (size (dim0 ya))
-	 (xa (make-uniform-knots size)))
-    (make-rinterpolation type xa ya)))
+  (case (grid:rank object)
+    (1 (let* ((ya (if (eq 'vector-double-float (type-of object))
+		      object
+		      (copy object :grid-type 'foreign-array)))
+	      (size (dim0 ya))
+	      (xa (make-uniform-knots size)))
+	 (make-rinterpolation type xa ya)))
+    (2 (destructuring-bind (components points) (grid:dimensions object)
+	 (let ((xa (make-uniform-knots points))
+	       (interpolations (make-array `(,components))))
+	   (dotimes (i components)
+	     (let ((foreign (make-grid `((foreign-array ,points) double-float))))
+	       (grid:slice object `((:range ,i ,i) :all) :destination foreign)
+	       (setf (aref interpolations i)
+		     (make-rinterpolation type xa foreign))))
+	   interpolations)))
+    (t (error "Cannot interpolate array of rank ~d." (grid:rank object)))))
 
 ;;; Generics of GSLL functions.
 (defmethod evaluate ((object rinterpolation) point &key)
