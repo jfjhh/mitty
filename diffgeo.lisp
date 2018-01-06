@@ -125,17 +125,21 @@ function evaluated as per local-map."))
 	       (antik:+ current (funcall function c u i))))))
     (curve-map #'disp curve :impure t)))
 
-(defun minimize-curvature (curve u i &optional (step-size 0.0025))
-  "An attempt at a displace function that will minimize curvature of curve upon
-   iteration. Currently requires sufficiently small step-size to be stable.
-   TODO: Implement springiness so that points that are moved closer together will
-         also be pushed apart."
+(defun circulate (curve u i &optional (step-size 1d-2))
+  "Fancy curve flow, similar to curve-shortening, that makes a curve circular."
   (declare (ignore i))
   (let* ((n (normalize (normal curve u)))
 	 (k (curvature curve u))
-	 (sgn (if (plusp k) 1 -1))
-	 (s (* sgn (clamp (* (abs k) step-size) 0d0 0.1d0))))
+	 (k* (1- k))
+	 (q (- (* (/ pi) (atan k*))))
+	 (v (/ (1+ (* k* k*))))
+	 (v* (1- v))
+	 (s (* step-size v* q)))
     (antik:* n s)))
+
+(defun wrinkle (curve u i &optional (step-size 1d-3))
+  "Do the opposite of circulate, which looks like wrinkling."
+  (antik:- (circulate curve u i step-size)))
 
 (defun jiggle (amount)
   "A displace function that generates vectors in the closed disk of radius amount."
@@ -155,4 +159,6 @@ function evaluated as per local-map."))
 			  :color (sdl:color)
 			  :alpha 32)
     (displace curve function))
-  (draw curve *screen* :n (* 3 (size curve)) :clear nil :base t :normals t))
+  ;(draw curve *screen* :n (* 3 (size curve)) :clear nil :base t :normals t)
+  (draw curve *screen* :n (* 4 (size curve)) :clear nil :base nil :normals nil)
+  )
