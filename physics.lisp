@@ -100,6 +100,7 @@
   (:documentation "A kinematic bullet that can generate child bullets of its own."))
 
 (defmethod initialize-instance :after ((bullet generator-bullet) &key (max-children 16))
+  "Initializes the child queue of generator-bullet bullet to hold max-children."
   (setf (slot-value bullet 'children) (make-queue max-children)))
 
 (defclass physical-particle (physical-object particle)
@@ -124,30 +125,37 @@
 ;;; Update: simulation steps.
 
 (defmethod update :before ((bullet bullet) dt &key)
+  "Runs the bullet update-func before doing other kinetic updates."
   (when (slot-boundp bullet 'update-func)
     (funcall (update-func bullet) bullet dt)))
 
 (defmethod update ((bullet angular-bullet) dt &key)
+  "Steps bullet angular position and angular velocity by dt."
   (with-slots (ang-pos ang-vel ang-acc) bullet
     (incf ang-pos (* ang-vel dt))
     (incf ang-vel (* ang-acc dt)))
   (call-next-method))
 
 (defmethod update ((bullet linear-bullet) dt &key)
+  "Steps bullet position by velocity given by bullet vel in bullet direction."
   (with-slots (pos ang-pos vel acc) bullet
     (incf vel (* acc dt))
     (incf (aref pos 0) (* vel dt (cos ang-pos)))
     (incf (aref pos 1) (* vel dt (sin ang-pos)))))
 
 (defmethod update :after ((bullet generator-bullet) dt &key)
+  "Update generator-bullet children with time step dt."
   (with-slots (children) bullet
     (loop :for i :from 2 :to (queue-count children) :do
        (update (svref children i) dt))))
 
 (defmethod update ((particle physical-particle) dt &key)
+  "Steps particle position and velocity by dt."
   (with-slots (pos vel acc) particle
     (antik:incf pos (antik:* vel dt))
     (antik:incf vel (antik:* acc dt)))) 
+
+;;; Update utility functions.
 
 (defun add-bullet-child (update-func)
   "Makes a bullet update function that adds the result of update-func to (children bullet)."
@@ -170,61 +178,61 @@
 (defgeneric gravitational-potential (pobject1 position)
   (:documentation "Calculates the gravitational potential due to pobject1 at position."))
 
-(defgeneric electric-potential (pobject1 position)
-  (:documentation "Calculates the electric potential due to pobject1 at position."))
-
-(defgeneric gravitational-field (pobject1 position)
-  (:documentation "Calculates the gravitational field due to pobject1 at position."))
-
-(defgeneric electric-field (pobject1 position)
-  (:documentation "Calculates the electric field due to pobject1 at position."))
-
-(defgeneric gravitational-potential-gradient (pobject1 position)
-  (:documentation
-   "Calculates the gradient of the gravitational potential due to pobject1 at position."))
-
-(defgeneric electric-potential-gradient (pobject1 position)
-  (:documentation
-   "Calculates the gradient of the electric potential due to pobject1 at position."))
-
-(defgeneric gravitational-force (pobject1 pobject2)
-  (:documentation "Calculates the gravitational force of pobject 1 on pobject 2"))
-
-(defgeneric couloumb-force (pobject1 pobject2)
-  (:documentation "Calculates the electric force of pobject 1 on pobject 2"))
-
-(defgeneric net-force (pobject1 pobject2)
-  (:documentation "Calculates the net force of pobject 1 on pobject 2"))
-
 (defmethod gravitational-potential ((pobject1 physical-particle) position)
   (let* ((r (norm (antik:- (pos pobject1) position))))
     (/ (* +gravitational-constant+ (mass pobject1)) r)))
 
+(defgeneric electric-potential (pobject1 position)
+  (:documentation "Calculates the electric potential due to pobject1 at position."))
+
 (defmethod electric-potential ((pobject1 physical-particle) position)
   (let* ((r (norm (antik:- position (pos pobject1)))))
     (/ (* +couloumb-number+ (charge pobject1)) r)))
+
+(defgeneric gravitational-field (pobject1 position)
+  (:documentation "Calculates the gravitational field due to pobject1 at position."))
 
 (defmethod gravitational-field ((pobject1 physical-particle) position)
   (let* ((r (antik:- (pos pobject1) position)))
     (multiple-value-bind (r^ |r|) (normalize r)
       (antik:* r^ (/ (* +gravitational-constant+ (mass pobject1)) (* |r| |r|))))))
 
+(defgeneric electric-field (pobject1 position)
+  (:documentation "Calculates the electric field due to pobject1 at position."))
+
 (defmethod electric-field ((pobject1 physical-particle) position)
   (let* ((r (antik:- position (pos pobject1))))
     (multiple-value-bind (r^ |r|) (normalize r)
       (antik:* r^ (/ (* +couloumb-number+ (charge pobject1)) (* |r| |r|))))))
 
+(defgeneric gravitational-potential-gradient (pobject1 position)
+  (:documentation
+   "Calculates the gradient of the gravitational potential due to pobject1 at position."))
+
 (defmethod gravitational-potential-gradient ((pobject1 physical-particle) position)
   (antik:- (gravitational-field pobject1 position)))
+
+(defgeneric electric-potential-gradient (pobject1 position)
+  (:documentation
+   "Calculates the gradient of the electric potential due to pobject1 at position."))
 
 (defmethod electric-potential-gradient ((pobject1 physical-particle) position)
   (antik:- (electric-field pobject1 position)))
 
+(defgeneric gravitational-force (pobject1 pobject2)
+  (:documentation "Calculates the gravitational force of pobject 1 on pobject 2"))
+
 (defmethod gravitational-force ((pobject1 physical-particle) (pobject2 physical-particle))
   (antik:* (mass pobject2) (gravitational-field pobject1 (pos pobject2))))
 
+(defgeneric couloumb-force (pobject1 pobject2)
+  (:documentation "Calculates the electric force of pobject 1 on pobject 2"))
+
 (defmethod couloumb-force ((pobject1 physical-particle) (pobject2 physical-particle))
   (antik:* (charge pobject2) (electric-field pobject1 (pos pobject2))))
+
+(defgeneric net-force (pobject1 pobject2)
+  (:documentation "Calculates the net force of pobject 1 on pobject 2"))
 
 (defmethod net-force ((pobject1 physical-particle) (pobject2 physical-particle))
   (antik:+ (gravitational-force pobject1 pobject2)
@@ -233,15 +241,19 @@
 ;;; Physics methods on many particles.
 
 (defun all-pairs (list)
+  "All distinct pairs of elements of list. For n elements, returns (* 1/2 n (+ n 1)) pairs."
   (mapcon (lambda (x) (mapcar (curry #'cons (car x)) (cdr x))) list))
 
 (defun map-pairs* (function list)
+  "Calls function with all distinct pairs of elements in list, collecting (cons pair result)."
   (mapcar (lambda (x) (cons x (funcall function (car x) (cdr x)))) (all-pairs list)))
 
 (defun map-pairs (function list)
+  "Calls function with all distinct pairs of elements in list, collecting results."
   (mapcar #'cdr (map-pairs* function list)))
 
 (defun apply-force (p1 p2 force-1->2)
+  "Changes accelerations of particles p1 and p2 by the internal force-1->2."
   (antik:incf (acc p2) (antik:/ force-1->2 (mass p2)))
   (antik:incf (acc p1) (antik:/ (antik:- force-1->2) (mass p1))))
 
@@ -264,6 +276,8 @@
 	    (map-pairs* #'pair-force (iota (length psequence)))))))
 
 (defun electric-field-line (charge-particles)
+  "Returns a function that will calculate the electric field due to
+   charge-particles at a point."
   (let ((length (length charge-particles)))
     (lambda (position)
       (let ((field (grid 0 0 0)))
@@ -273,6 +287,8 @@
 	(normalize field)))))
 
 (defun electric-equipotential-line (charge-particles)
+  "Returns a function that will calculate a equipotential vector that is
+   perpendicular to the electric field line due to charge-particles at a point."
   (let ((field-line (electric-field-line charge-particles)))
     (lambda (position)
       (let* ((field (funcall field-line position))
@@ -285,6 +301,12 @@
 		      &key
 			(step 10d0) (max 1024) (stop-at 'oscillation)
 			(period-epsilon (1- step)))
+  "Calls point-function at points obtained by stepping initial-position by
+   (* gradient-function step), with maximum number of steps max. When stop-at
+   is 'oscillation, stepping stops if the inner product of the differences
+   between the three latest steps is negative (like (inner (- s1 s2) (- s2 s3)).
+   When stop-at is 'period, stop when the position is period-epsilon away from
+   initial-position."
   (declare (type function gradient-function point-function)
 	   (type double-float step period-epsilon)
 	   (type fixnum max))
@@ -311,12 +333,11 @@
 					     (antik:- position old)))))
 		   (period
 		    (< (the double-float (distance initial-position position))
-		       period-epsilon))
-		   (t (error "Stop-at method ~a is not one of oscillation or period."
-			     stop-at))))
+		       period-epsilon))))
 	   (loop-finish))))))
 
 (defun transpose (2d-grid)
+  "Transposes the grid of grids 2d-grid into a real multidimensional array."
   (let* ((points (length 2d-grid))
 	 (components (length (aref 2d-grid 0)))
 	 (coordinates (make-array `(,components ,points) :element-type
@@ -329,6 +350,8 @@
 
 (defun draw-connected-points (&optional (screen *screen*)
 				(color (rainbow-color (setf *cparam* (mod (+ *cparam* 1.5d-3) 1d0)))))
+  "Returns a function that when called successively with points, will draw
+   those points connected together to screen with color color."
   (let (old)
     (lambda (point)
       (let ((position (project-point point screen)))
@@ -341,12 +364,20 @@
 	(setf old position)))))
 
 (defun electric-field-line-curve (charges start
-				  &key (type 'cspline) equipotentialp (step 10d0)
+				  &key (type 'cspline) equipotential (step 10d0)
 				    (max 1024) (invert nil) (draw t) (interpolate nil))
+  "Draws or interpolates an electric field or equipotential curve for charges from start.
+   :type is an interpolation type.
+   :equipotential t draws an equipotential curve, otherwise an electric field curve.
+   :step is the path step size.
+   :max is the maximum number of steps.
+   :invert t uses a negative test charge, otherwise positive.
+   :draw t draws the curve to *screen*.
+   :interpolate t will return the interpolation of the curve with :type."
   (let ((points (when interpolate (make-array 1024 :adjustable t :fill-pointer 0))))
     (flet ((build-gradient-function ()
 	     (let ((field-function (the function
-					(if equipotentialp
+					(if equipotential
 					    (electric-equipotential-line charges)
 					    (electric-field-line charges)))))
 	       (if invert
@@ -367,7 +398,7 @@
       (let ((gradient-function (build-gradient-function))
 	    (point-function (build-point-function)))
 	(do-path-steps gradient-function start point-function
-		       :stop-at (if equipotentialp 'period 'oscillation)
+		       :stop-at (if equipotential 'period 'oscillation)
 		       :step step
 		       :max max)
 	(when interpolate
@@ -377,6 +408,7 @@
 			      (aref interpolations 1))))))))
 
 (defun circumscribe (n &optional (offset 0d0))
+  "Returns n uniform points on the unit circle, from (1, 0), rotated by offset."
   (flet ((circle-point (i)
 	   (let ((angle (+ offset (* tau (/ i n)))))
 	     (grid (cos angle)
@@ -385,21 +417,27 @@
     (map 'vector #'circle-point (iota n))))
 
 (defun points-from (point n &optional (direction (grid 1d0 0d0 0d0)) (offset 1))
+  "Returns n points on a line from point, stepping by direction, from offset steps."
   (map 'vector (lambda (i) (antik:+ point (antik:* (+ i offset) direction))) (iota n)))
 
 (defun points-around (point n &optional (r 1d0) (offset 0d0))
+  "Returns n points in a circle with radius r around point rotated by offset."
   (map 'vector (lambda (x) (antik:+ point (antik:* r x))) (circumscribe n offset)))
 
 (defun electric-field-line-curves (charges n r
-				   &key (type 'cspline) equipotentialp (step 15d0) (max 128) (clear t)
+				   &key (type 'cspline) equipotential (step 15d0) (max 128) (clear t)
 				     (draw t) (interpolate nil))
+  "Draws or interpolates n electric field or equipotential curves for charges from start.
+   n curves will be calculated at radius r from each of the charges.
+   When :equipotential t, step by r between curves.
+   Other keywords are for electric-field-line-curve."
   (when clear
     (clear (sdl:color)))
   (let ((source-charges charges))
     (prog1
 	(loop :for i :below (length source-charges) :collecting
 	   (with-slots (pos charge) (aref source-charges i)
-	     (let ((regions (if equipotentialp
+	     (let ((regions (if equipotential
 				(points-from pos n
 					     (antik:* r (normalize (grid 1 (sqrt 2) 0))) 3)
 				(points-around pos n r))))
@@ -407,7 +445,7 @@
 		  (progn
 		    (electric-field-line-curve charges start
 					       :type type
-					       :equipotentialp equipotentialp
+					       :equipotential equipotential
 					       :step step
 					       :max max
 					       :invert (minusp charge)
@@ -416,14 +454,17 @@
       (dotimes (i (length charges))
 	(draw (aref charges i) *screen* :size 5d0)))))
 
-(defun simulation-step (charges &optional (dt 1d0) (draw-field nil) (draw t))
-  (apply-interaction-forces charges)
-  (dotimes (i (length charges))
-    (update (aref charges i) dt))
+(defun simulation-step (particles &optional (dt 1d0) (draw t) (draw-field nil))
+  "Do a simulation step of particles with time step dt.
+   :draw t will draw the particles to *screen*.
+   :draw-field t (requiring :draw t) will draw electric field line curves."
+  (apply-interaction-forces particles)
+  (dotimes (i (length particles))
+    (update (aref particles i) dt))
   (when draw
     (if draw-field
-	(electric-field-line-curves charges 8 1d0 :max 48 :step 15d0)
+	(electric-field-line-curves particles 8 1d0 :max 48 :step 15d0)
 	(progn
 	  (clear)
-	  (dotimes (i (length charges))
-	    (draw (aref charges i) *screen* :size 5d0))))))
+	  (dotimes (i (length particles))
+	    (draw (aref particles i) *screen* :size 5d0))))))
