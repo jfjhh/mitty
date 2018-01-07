@@ -12,6 +12,13 @@
 (defparameter *deform-curve* nil
   "Boolean to deform the curve *deform* or not.")
 
+(defparameter *simulate* t
+  "Boolean to simulate physics of *simulation-particles* or not.")
+(defparameter *simulation-particles* nil
+  "Collection of particles to simulate")
+(defparameter *simulation-dt* 5d-1
+  "Time step for the simulation")
+
 (defparameter *screen*
   (make-instance 'sdl-screen
 		 :width 640d0
@@ -26,6 +33,8 @@
   "Resets the application state to initial values."
   (clear)
   (sdl:update-display)
+
+  ;; Reset curve deforming.
   (let ((abscissa (rlambda (x) (+ (cos x) (* -1/3 (cos (* x 3))))))
 	(ordinate (rlambda (x) (+ (sin x) (*  1/8 (sin (* x 7)))))))
     (setf (domain abscissa) (interval 0 tau))
@@ -34,7 +43,27 @@
     (setf *deform-curve*
 	  (make-plane-curve
 	   (interpolate abscissa 'periodic-cspline :n 32)
-	   (interpolate ordinate 'periodic-cspline :n 32)))))
+	   (interpolate ordinate 'periodic-cspline :n 32))))
+
+  ;; Reset simulation.
+  (let* ((n 24)
+	 (r 160d0)
+	 (particles (map 'vector
+			 (lambda (x) (make-physical-particle
+				 3
+				 :pos x
+				 :vel (antik:* 2d-1 (abs (sin (/ (aref x 0) r)))
+					       (grid (+ (aref x 0) (* 1d0 (aref x 1)))
+						     (* 1d0 (aref x 0))
+						     0))
+				 :sok t))
+			 (points-around (grid 0 0 -320) n r))))
+    (dotimes (i n)
+      (dotimes (j n)
+	(unless (= i j)
+	  (spring-connect (aref particles i) (aref particles j)))))
+    (setf *simulate* t)
+    (setf *simulation-particles* particles)))
 
 (defun run-sdl-thread (&optional (func #'mitty-main) (name "Mitty"))
   "Convenience to run the SDL thread so that the REPL does not block."
@@ -45,7 +74,8 @@
   (with-slots (width height) *screen*
     (sdl:with-init ()
       (sdl:window width height :title-caption "Mitty | SDL2 Test")
-      (setf (sdl:frame-rate) 12) ; Currently controls rate of deformation.
+      (setf (sdl:frame-rate) 30) ; Currently controls rate of deformation.
+      ;(setf (sdl:frame-rate) 12) ; Currently controls rate of deformation.
       (reset)
       (sdl:with-events ()
 	(:quit-event () t)
@@ -67,7 +97,11 @@
 
 			 ;; Toggle wrinkling on or off with w.
 			 (when (sdl:key= key :sdl-key-w)
-			   (setf *wrinkle* (not *wrinkle*))))
+			   (setf *wrinkle* (not *wrinkle*)))
+
+			 ;; Toggle simulation on or off with s.
+			 (when (sdl:key= key :sdl-key-s)
+			   (setf *simulate* (not *simulate*))))
 	(:video-expose-event () (sdl:update-display))
 	(:idle ()
 	       ;; Deform the curve.
@@ -75,5 +109,9 @@
 		 (clear)
 		 (setf *cparam* (mod (+ *cparam* 1d-4) 1d0))
 		 (draw-deform *deform-curve* (if *wrinkle* #'wrinkle #'circulate) 8))
+
+	       ;; Simulate particle motion.
+	       (when *simulate*
+		 (simulation-step *simulation-particles* *simulation-dt* t nil))
 
 	       (sdl:update-display))))))

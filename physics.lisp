@@ -20,6 +20,15 @@
 (defconstant +vacuum-permittivity+ 8.854187817d-12)
 (defconstant +couloumb-number+ (/ (* 4d0 pi +vacuum-permittivity+)))
 
+;;; Spring simulations are numerically unstable. These values need tuning for
+;;; stability, especially *damping*, that depends roughly upon the energy of the
+;;; system.
+(defparameter *default-mass* 1d1)
+(defparameter *default-charge* +elementary-charge+)
+(defparameter *default-elasticity* 1d-2)
+(defparameter *default-equilibrium* 1d2)
+(defparameter *damping* 5d-2)
+
 ;;; Physics and bullet objects.
 
 (defclass physical-object ()
@@ -31,8 +40,45 @@
 	   :accessor charge
 	   :type charge
 	   :documentation "The charge of the particle in Couloumbs."))
-  (:default-initargs :mass 1d0 :charge +elementary-charge+)
-  (:documentation "A particle with mass and charge."))
+  (:default-initargs :mass 0d0 :charge 0d0)
+  (:documentation "A physical object with at least mass and charge."))
+
+(defclass spring (physical-object)
+  ((elasticity :initarg :elasticity
+	       :accessor elasticity
+	       :type scalar
+	       :documentation "The linear elasticity of the spring in N/m.")
+   (equilibrium :initarg :equilibrium
+		:accessor equilibrium
+		:type scalar
+		:documentation "The equilibrium length of the spring in meters.")
+   (start :initarg :start
+	  :accessor start
+	  :type physical-object
+	  :documentation "One end of the spring.")
+   (end :initarg :end
+	:accessor end
+	:type physical-object
+	:documentation "One end of the spring."))
+  (:default-initargs :elasticity *default-elasticity* :equilibrium *default-equilibrium*)
+  (:documentation "A spring connection between two physical-objects."))
+
+(defun make-spring (p1 &optional p2
+			 (elasticity *default-elasticity*)
+			 (equilibrium *default-equilibrium* ep))
+  (if p2
+      (progn
+	(when ep
+	  (setf equilibrium (distance (pos p1) (pos p2))))
+	(make-instance 'spring
+		       :elasticity elasticity
+		       :equilibrium equilibrium
+		       :start p1
+		       :end p2))
+      (make-instance 'spring
+		     :elasticity elasticity
+		     :equilibrium equilibrium
+		     :start p1)))
 
 (defclass kinematic-object ()
   ()
@@ -112,15 +158,71 @@
 	:accessor acc
 	:type rvector
 	:documentation "The acceleration of the particle."))
+  (:default-initargs :mass *default-mass* :charge *default-charge*)
   (:documentation "A particle that can experience kinematic motion from forces."))
 
-(defun make-physical-particle (n)
+(defclass massive-particle (physical-particle)
+  ()
+  (:documentation "A physical-particle that is affected by gravitational fields."))
+
+(defclass charged-particle (physical-particle)
+  ()
+  (:documentation "A physical-particle that is affected by electric fields."))
+
+(defclass spring-particle (physical-particle)
+  ((springs :initarg :springs
+	    :accessor springs
+	    :type vector
+	    :documentation "A collection of springs connected to the particle."))
+  (:documentation "A physical-particle that is affected by spring forces."))
+
+(defmethod initialize-instance :after ((instance spring-particle) &key (nsprings 2))
+  (unless (slot-boundp instance 'springs)
+    (setf (slot-value instance 'springs)
+	  (make-array nsprings :adjustable t :fill-pointer 0))))
+
+(defun spring-connect (p1 p2 &key
+			       (elasticity *default-elasticity*)
+			       (equilibrium *default-equilibrium*))
+  (let ((spring (make-spring p1 p2 elasticity equilibrium)))
+    (vector-push-extend spring (springs p1))
+    (vector-push-extend spring (springs p2))))
+
+(defclass field-particle (massive-particle charged-particle)
+  ()
+  (:documentation "A physical-particle that is affected by fields."))
+
+(defclass full-particle (massive-particle charged-particle spring-particle)
+  ()
+  (:documentation "A physical-particle that is affected by everything implemented."))
+
+(defun determine-particle-type (mok cok sok)
+  "Determines the type of a physical particle, given the interactions allowed.
+   mok t for interaction with gravitational fields.
+   cok t for interaction with electric fields.
+   sok t for interaction with springs."
+  (if sok
+      (if (or mok cok) 'full-particle 'spring-particle)
+      (if mok
+	  (if cok 'field-particle 'massive-particle)
+	  (if cok 'charged-particle 'physical-particle))))
+
+(defun make-physical-particle (d &key pos vel acc
+				   (mass *default-mass* m*)
+				   (charge *default-charge* c*)
+				   (mok m*) (cok c*) sok)
   "Makes a physical particle of dimensionality n."
-  (let ((zero (make-grid `((array ,n) double-float))))
-    (make-instance 'physical-particle
-		   :pos zero
-		   :vel zero
-		   :acc zero)))
+  (when (not (plusp d))
+    (error "Dimensionality ~d of a physical-particle must be positive." d))
+  (when (> d 3)
+    (warn "Creating physical-particle of high dimensionality ~d." d))
+  (let ((zero (make-grid `((array ,d) double-float))))
+    (make-instance (determine-particle-type mok cok sok)
+		   :pos (or pos zero)
+		   :vel (or vel zero)
+		   :acc (or acc zero)
+		   :mass mass
+		   :charge charge)))
 
 ;;; Update: simulation steps.
 
@@ -148,6 +250,10 @@
   (with-slots (children) bullet
     (loop :for i :from 2 :to (queue-count children) :do
        (update (svref children i) dt))))
+
+(defmethod update :before ((particle spring-particle) dt &key)
+  (with-slots (vel acc) particle
+    (antik:decf acc (antik:* *damping* vel))))
 
 (defmethod update ((particle physical-particle) dt &key)
   "Steps particle position and velocity by dt."
@@ -231,12 +337,55 @@
 (defmethod couloumb-force ((pobject1 physical-particle) (pobject2 physical-particle))
   (antik:* (charge pobject2) (electric-field pobject1 (pos pobject2))))
 
+(defun net-spring-force (particle)
+  "Calculates the spring force on particle from its springs."
+  (with-slots (pos springs) particle
+    (let* ((zero (make-grid `((array ,(length pos)) double-float)))
+	   (force zero))
+      (dotimes (i (length springs))
+	(with-slots (elasticity equilibrium start end) (aref springs i)
+	  (when (or (eq particle start) (eq particle end))
+	    (antik:incf force
+			(let ((r (if (eq particle start)
+				     (antik:- (pos start) (pos end))
+				     (antik:- (pos end) (pos start)))))
+			  (multiple-value-bind (r^ |r|) (normalize r)
+			    (antik:* (* elasticity (- equilibrium |r|)) r^)))))))
+      force)))
+
+(define-method-combination antik:+ :identity-with-one-argument t)
+
+(defun g+ (&rest grids)
+  "Each of grids is a vector of grids. These are all added componentwise."
+  (let* ((g (car grids))
+	 (size (length g)) 
+	 (out (make-array size
+			  :element-type (type-of (aref g 0))
+			  :initial-element (grid 0 0 0))))
+    (dolist (grid grids)
+      (dotimes (i size)
+	(antik:incf (aref out i) (aref grid i))))
+    out))
+
+(define-method-combination g+ :identity-with-one-argument t)
+
 (defgeneric net-force (pobject1 pobject2)
+  (:method-combination antik:+ :most-specific-last)
   (:documentation "Calculates the net force of pobject 1 on pobject 2"))
 
-(defmethod net-force ((pobject1 physical-particle) (pobject2 physical-particle))
-  (antik:+ (gravitational-force pobject1 pobject2)
-	   (couloumb-force pobject1 pobject2)))
+(defmethod net-force antik:+ ((pobject1 physical-particle) (pobject2 massive-particle))
+  (print "MASS ")
+  (gravitational-force pobject1 pobject2))
+
+(defmethod net-force antik:+ ((pobject1 physical-particle) (pobject2 charged-particle))
+  (print "CHARGE ")
+  (couloumb-force pobject1 pobject2))
+
+#||
+(defmethod net-force antik:+ ((pobject1 physical-particle) (pobject2 spring-particle))
+  (print "SPRING ")
+  (net-spring-force pobject2))
+||#
 
 ;;; Physics methods on many particles.
 
@@ -252,10 +401,17 @@
   "Calls function with all distinct pairs of elements in list, collecting results."
   (mapcar #'cdr (map-pairs* function list)))
 
-(defun apply-force (p1 p2 force-1->2)
+(defun map-vector-pairs* (function vector)
+  (map-pairs* (lambda (i j) (funcall function (aref vector i) (aref vector j)))
+	      (iota (length vector))))
+
+(defun apply-force (p1 force)
+  (antik:incf (acc p1) (antik:* (/ (mass p1)) force)))
+
+(defun apply-force-pair (p1 p2 force-1->2)
   "Changes accelerations of particles p1 and p2 by the internal force-1->2."
-  (antik:incf (acc p2) (antik:/ force-1->2 (mass p2)))
-  (antik:incf (acc p1) (antik:/ (antik:- force-1->2) (mass p1))))
+  (apply-force p2 force-1->2)
+  (apply-force p1 (antik:- force-1->2)))
 
 (defun apply-interaction-forces (psequence)
   "Calculates interaction forces between physical-particles."
@@ -263,17 +419,25 @@
 	   (let ((p1 (aref psequence i))
 		 (p2 (aref psequence j)))
 	     (net-force p1 p2)))
-	 (apply-force-pair (x)
+	 (apply-force-pair* (x)
 	   (destructuring-bind ((i . j) . force) x
 	     (let ((p1 (aref psequence i))
 		   (p2 (aref psequence j)))
-	       (apply-force p1 p2 force)))))
+	       (apply-force-pair p1 p2 force)))))
     (let ((n (length psequence)))
       (dotimes (i n)
 	(let ((p (aref psequence i)))
 	  (setf (acc p) (antik:* (acc p) 0d0))))
-      (mapc #'apply-force-pair
+      (mapc #'apply-force-pair*
 	    (map-pairs* #'pair-force (iota (length psequence)))))))
+
+(defun apply-spring-forces (psequence)
+  (let ((spring-particles (remove-if-not (lambda (p) (typep p 'spring-particle))
+					 psequence)))
+    (dotimes (i (length spring-particles))
+      (let ((particle (aref spring-particles i)))
+	(setf (acc particle) (grid 0 0 0))
+	(apply-force particle (net-spring-force particle))))))
 
 (defun electric-field-line (charge-particles)
   "Returns a function that will calculate the electric field due to
@@ -458,7 +622,8 @@
   "Do a simulation step of particles with time step dt.
    :draw t will draw the particles to *screen*.
    :draw-field t (requiring :draw t) will draw electric field line curves."
-  (apply-interaction-forces particles)
+  ;(apply-interaction-forces particles)
+  (apply-spring-forces particles)
   (dotimes (i (length particles))
     (update (aref particles i) dt))
   (when draw
@@ -466,5 +631,13 @@
 	(electric-field-line-curves particles 8 1d0 :max 48 :step 15d0)
 	(progn
 	  (clear)
+	  (let* ((positions (map-grid :source particles :element-function #'pos))
+		 (positions* (concatenate 'vector positions (vector (aref positions 0))))
+		 (coordinates (transpose positions*))
+		 (interpolates (interpolate coordinates 'periodic-cspline))
+		 (plane-curve (make-plane-curve (aref interpolates 0)
+						(aref interpolates 1))))
+	    (draw plane-curve *screen*
+		  :clear nil :normals nil :base nil :n (* 3 (length positions))))
 	  (dotimes (i (length particles))
 	    (draw (aref particles i) *screen* :size 5d0))))))
