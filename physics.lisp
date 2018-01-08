@@ -353,8 +353,6 @@
 			    (antik:* (* elasticity (- equilibrium |r|)) r^)))))))
       force)))
 
-(define-method-combination antik:+ :identity-with-one-argument t)
-
 (defun g+ (&rest grids)
   "Each of grids is a vector of grids. These are all added componentwise."
   (let* ((g (car grids))
@@ -367,7 +365,8 @@
 	(antik:incf (aref out i) (aref grid i))))
     out))
 
-(define-method-combination g+ :identity-with-one-argument t)
+(eval-when (:compile-toplevel :load-toplevel)
+  (define-method-combination antik:+ :identity-with-one-argument t))
 
 (defgeneric net-force (pobject1 pobject2)
   (:method-combination antik:+ :most-specific-last)
@@ -380,12 +379,6 @@
 (defmethod net-force antik:+ ((pobject1 physical-particle) (pobject2 charged-particle))
   (print "CHARGE ")
   (couloumb-force pobject1 pobject2))
-
-#||
-(defmethod net-force antik:+ ((pobject1 physical-particle) (pobject2 spring-particle))
-  (print "SPRING ")
-  (net-spring-force pobject2))
-||#
 
 ;;; Physics methods on many particles.
 
@@ -622,6 +615,7 @@
   "Do a simulation step of particles with time step dt.
    :draw t will draw the particles to *screen*.
    :draw-field t (requiring :draw t) will draw electric field line curves."
+  ;; For spring demo.
   ;(apply-interaction-forces particles)
   (apply-spring-forces particles)
   (dotimes (i (length particles))
