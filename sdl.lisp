@@ -19,10 +19,17 @@
 (defparameter *simulation-dt* 5d-1
   "Time step for the simulation")
 
+(defparameter *danmaku* t
+  "Boolean to run danmaku updates or not.")
+(defparameter *danmaku-dt* 1d0
+  "Time step for bullet kinetics.")
+(defparameter *danmaku-generator* nil
+  "The parent bullet for the danmaku.")
+
 (defparameter *screen*
   (make-instance 'sdl-screen
-		 :width 640d0
-		 :height 640d0)
+		 :width 1024d0
+		 :height 1024d0)
   "The main SDL screen.")
 
 (defun clear (&optional (color (sdl:color :r 0 :g 0 :b 0)))
@@ -62,8 +69,25 @@
       (dotimes (j n)
 	(unless (= i j)
 	  (spring-connect (aref particles i) (aref particles j)))))
-    (setf *simulate* t)
-    (setf *simulation-particles* particles)))
+    (setf *simulate* nil)
+    (setf *simulation-particles* particles))
+
+  (setf *danmaku* nil)
+  (setf *danmaku-dt* 1d0)
+  (setf *danmaku-generator*
+	(make-instance
+	 'generator-bullet
+	 :vel 5d-1
+	 :max-children 512
+	 :update-func (add-bullet-child
+		       (let ((angle 0))
+			 (lambda (bullet dt)
+			   (declare (ignore dt))
+			   (make-instance
+			    'kinematic-bullet
+			    :pos (copy (pos bullet))
+			    :vel 1d0
+			    :ang-pos (incf angle (/ (1+ (sqrt 5)) 2)))))))))
 
 (defun run-sdl-thread (&optional (func #'mitty-main) (name "Mitty"))
   "Convenience to run the SDL thread so that the REPL does not block."
@@ -101,17 +125,28 @@
 
 			 ;; Toggle simulation on or off with s.
 			 (when (sdl:key= key :sdl-key-s)
-			   (setf *simulate* (not *simulate*))))
+			   (setf *simulate* (not *simulate*)))
+
+			 ;; Toggle danmaku on or off with b.
+			 (when (sdl:key= key :sdl-key-b)
+			   (setf *danmaku* (not *danmaku*))))
 	(:video-expose-event () (sdl:update-display))
 	(:idle ()
-	       ;; Deform the curve.
-	       (when *deform*
+	       (when (or *deform* *simulate* *danmaku*)
 		 (clear)
-		 (setf *cparam* (mod (+ *cparam* 1d-4) 1d0))
-		 (draw-deform *deform-curve* (if *wrinkle* #'wrinkle #'circulate) 8))
 
-	       ;; Simulate particle motion.
-	       (when *simulate*
-		 (simulation-step *simulation-particles* *simulation-dt* t nil))
+		 ;; Deform the curve.
+		 (when *deform*
+		   (setf *cparam* (mod (+ *cparam* 1d-4) 1d0))
+		   (draw-deform *deform-curve* (if *wrinkle* #'wrinkle #'circulate) 8))
 
-	       (sdl:update-display))))))
+		 ;; Simulate particle motion.
+		 (when *simulate*
+		   (simulation-step *simulation-particles* *simulation-dt* t nil))
+
+		 ;; Update Danmaku kinetics.
+		 (when *danmaku*
+		   (update *danmaku-generator* *danmaku-dt*)
+		   (draw *danmaku-generator* *screen*))
+
+		 (sdl:update-display)))))))

@@ -622,9 +622,8 @@
     (update (aref particles i) dt))
   (when draw
     (if draw-field
-	(electric-field-line-curves particles 8 1d0 :max 48 :step 15d0)
+	(electric-field-line-curves particles 8 1d0 :max 48 :step 15d0 :clear nil)
 	(progn
-	  (clear)
 	  (let* ((positions (map-grid :source particles :element-function #'pos))
 		 (positions* (concatenate 'vector positions (vector (aref positions 0))))
 		 (coordinates (transpose positions*))
