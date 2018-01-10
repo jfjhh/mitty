@@ -631,6 +631,6 @@
 		 (plane-curve (make-plane-curve (aref interpolates 0)
 						(aref interpolates 1))))
 	    (draw plane-curve *screen*
-		  :clear nil :normals nil :base nil :n (* 3 (length positions))))
+		  :clear nil :normals nil :base nil :n (* 8 (length positions))))
 	  (dotimes (i (length particles))
 	    (draw (aref particles i) *screen* :size 5d0))))))

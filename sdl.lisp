@@ -18,6 +18,8 @@
   "Collection of particles to simulate")
 (defparameter *simulation-dt* 5d-1
   "Time step for the simulation")
+(defparameter *simulation-field* nil
+  "Boolean to draw the electric field in the spring simulation or not.")
 
 (defparameter *danmaku* t
   "Boolean to run danmaku updates or not.")
@@ -28,8 +30,8 @@
 
 (defparameter *screen*
   (make-instance 'sdl-screen
-		 :width 1024d0
-		 :height 1024d0)
+		 :width 1080d0
+		 :height 1080d0)
   "The main SDL screen.")
 
 (defun clear (&optional (color (sdl:color :r 0 :g 0 :b 0)))
@@ -53,7 +55,7 @@
 	   (interpolate ordinate 'periodic-cspline :n 32))))
 
   ;; Reset simulation.
-  (let* ((n 24)
+  (let* ((n 7)
 	 (r 160d0)
 	 (particles (map 'vector
 			 (lambda (x) (make-physical-particle
@@ -70,6 +72,7 @@
 	(unless (= i j)
 	  (spring-connect (aref particles i) (aref particles j)))))
     (setf *simulate* nil)
+    (setf *simulation-field* nil)
     (setf *simulation-particles* particles))
 
   (setf *danmaku* nil)
@@ -97,8 +100,8 @@
   "Main SDL function for Mitty."
   (with-slots (width height) *screen*
     (sdl:with-init ()
-      (sdl:window width height :title-caption "Mitty | SDL2 Test")
-      (setf (sdl:frame-rate) 30) ; Currently controls rate of deformation.
+      (sdl:window width height :title-caption "Mitty | SDL2 Test" :fullscreen t :hw t :async-blit t)
+      (setf (sdl:frame-rate) 60) ; Currently controls rate of deformation.
       ;(setf (sdl:frame-rate) 12) ; Currently controls rate of deformation.
       (reset)
       (sdl:with-events ()
@@ -127,6 +130,10 @@
 			 (when (sdl:key= key :sdl-key-s)
 			   (setf *simulate* (not *simulate*)))
 
+			 ;; Toggle simulation field on or off with f.
+			 (when (sdl:key= key :sdl-key-f)
+			   (setf *simulation-field* (not *simulation-field*)))
+
 			 ;; Toggle danmaku on or off with b.
 			 (when (sdl:key= key :sdl-key-b)
 			   (setf *danmaku* (not *danmaku*))))
@@ -138,11 +145,11 @@
 		 ;; Deform the curve.
 		 (when *deform*
 		   (setf *cparam* (mod (+ *cparam* 1d-4) 1d0))
-		   (draw-deform *deform-curve* (if *wrinkle* #'wrinkle #'circulate) 8))
+		   (draw-deform *deform-curve* (if *wrinkle* #'wrinkle #'circulate) 1))
 
 		 ;; Simulate particle motion.
 		 (when *simulate*
-		   (simulation-step *simulation-particles* *simulation-dt* t nil))
+		   (simulation-step *simulation-particles* *simulation-dt* t *simulation-field*))
 
 		 ;; Update Danmaku kinetics.
 		 (when *danmaku*
